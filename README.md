@@ -35,9 +35,9 @@ schedule says is due, which settles at a few thousand lookups a day -- see
 
 ```
 $ expiringsoon scan
-74947 words x 4 TLDs, 5 req/s per endpoint, store ~/.local/state/expiringsoon/domains.jsonl.gz
+74947 words x 4 TLDs, 3 req/s per endpoint, store ~/.local/state/expiringsoon/domains.jsonl.gz
 299788 domains to check, 0 up to date, 0 in store
-1761/299788  16.0/s  taken=1363 avail=334 unknown=0 fail=0 throttle=0  eta=5h10m
+1761/299788  8.9/s  taken=1363 avail=334 unknown=0 fail=0 throttle=0  eta=9h18m
 ```
 
 It is resumable. The store is written every minute and on exit, so `^C` costs
@@ -118,6 +118,29 @@ balancer**, HTML body, no `Retry-After`, for a request it served a second
 earlier and will serve again a second later. Both are treated as "slow down"
 rather than as refusals, because reading PIR's 403 as permanent marks a run of
 perfectly good domains as failures and, worse, does not slow down.
+
+What the default set actually tolerates, measured rather than guessed:
+
+| endpoint                                | observed                                                        |
+| --------------------------------------- | --------------------------------------------------------------- |
+| `rdap.verisign.com` (com/net)           | comfortable at 6/s                                                |
+| `rdap.publicinterestregistry.org` (org) | ~400 requests at 2/s, then steady shedding; sustained rate is under 1/s |
+| `rdap.centralnic.com` (xyz)             | same shape as PIR                                                 |
+
+The limit is not really a rate. A burst of 400 requests at 6/s passes cleanly
+at any concurrency, and it is the *sustained* run that degrades -- a token
+bucket with a generous burst and a slow refill. Neither concurrency
+(`-perhost`) nor HTTP/2 was found to matter.
+
+This is why `-minrate` defaults as low as it does. PIR's sustained allowance
+sits below one request per second; a higher floor leaves the limiter pinned at
+the bottom *and still throttled*, burning retries and marking perfectly good
+domains as failures. The limiter needs room to find the real number.
+
+The practical consequence: `.com` and `.net` scan fast, `.org` and `.xyz` are
+slow no matter how you ask. Bound a run with `scan -n 20000` and let a first
+scan take a few days; the schedule and the resumable store are built for
+exactly that.
 
 ## Data storage
 

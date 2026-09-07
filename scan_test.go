@@ -8,7 +8,7 @@ import (
 )
 
 func TestLimiterPaces(t *testing.T) {
-	l := newLimiter(50) // 20ms apart
+	l := newLimiter(50, 0.05) // 20ms apart
 	ctx := context.Background()
 	start := time.Now()
 	for i := 0; i < 5; i++ {
@@ -26,7 +26,7 @@ func TestLimiterPenaltyCooldownCollapsesABurst(t *testing.T) {
 	// The failure this guards: several workers share an endpoint, so one
 	// throttling incident arrives as a burst. Without the cooldown, each
 	// worker compounds the cut and the endpoint ends up at the cap.
-	l := newLimiter(10)
+	l := newLimiter(10, 0.05)
 	before := l.interval
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -47,7 +47,7 @@ func TestLimiterPenaltyCooldownCollapsesABurst(t *testing.T) {
 }
 
 func TestLimiterPenaltyIsCapped(t *testing.T) {
-	l := newLimiter(10)
+	l := newLimiter(10, 0.05) // floor of 0.05/s is a 20s interval
 	for i := 0; i < 100; i++ {
 		l.lastPen = time.Time{} // separate incidents
 		l.penalize(0)
@@ -55,10 +55,26 @@ func TestLimiterPenaltyIsCapped(t *testing.T) {
 	if l.interval > l.max {
 		t.Errorf("interval %s exceeds cap %s", l.interval, l.max)
 	}
+	if want := 20 * time.Second; l.max != want {
+		t.Errorf("floor of 0.05/s gave a cap of %s, want %s", l.max, want)
+	}
+}
+
+func TestLimiterFloorCannotExceedTheConfiguredRate(t *testing.T) {
+	// A minRate above rate is a contradiction; the configured rate wins and
+	// the limiter simply never adapts downward.
+	l := newLimiter(2, 10)
+	if l.max != l.base {
+		t.Errorf("max %s, base %s: a floor above the rate should collapse to it", l.max, l.base)
+	}
+	l.penalize(0)
+	if l.interval != l.base {
+		t.Errorf("interval moved to %s despite no room to slow down", l.interval)
+	}
 }
 
 func TestLimiterRelaxReturnsToBase(t *testing.T) {
-	l := newLimiter(10)
+	l := newLimiter(10, 0.05)
 	base := l.base
 	for i := 0; i < 20; i++ {
 		l.lastPen = time.Time{}
@@ -77,7 +93,7 @@ func TestLimiterRelaxReturnsToBase(t *testing.T) {
 }
 
 func TestLimiterRetryAfterDelaysNextSlot(t *testing.T) {
-	l := newLimiter(1000)
+	l := newLimiter(1000, 0.05)
 	l.penalize(50 * time.Millisecond)
 	start := time.Now()
 	if err := l.wait(context.Background()); err != nil {
@@ -89,7 +105,7 @@ func TestLimiterRetryAfterDelaysNextSlot(t *testing.T) {
 }
 
 func TestLimiterWaitRespectsCancellation(t *testing.T) {
-	l := newLimiter(1000)
+	l := newLimiter(1000, 0.05)
 	l.penalize(10 * time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

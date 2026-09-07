@@ -113,7 +113,15 @@ func cmdScan(args []string) error {
 	fs.IntVar(&o.min, "min", 4, "minimum word length")
 	fs.IntVar(&o.max, "max", 8, "maximum word length")
 	fs.BoolVar(&o.proper, "proper", false, "include capitalized dictionary entries")
-	fs.Float64Var(&cfg.rate, "rate", 5, "requests per second per registry host")
+	// 3/s is what the registries in the default set were measured to tolerate
+	// over a sustained run: Verisign is comfortable at 6, PIR and CentralNIC
+	// start shedding load somewhere between 2 and 6. The limiter adapts from
+	// here, so this is a starting point rather than a ceiling.
+	fs.Float64Var(&cfg.rate, "rate", 3, "requests per second per registry host")
+	// The floor the adaptive pacing may not go below. PIR's sustained
+	// allowance sits under 1/s, so a higher floor just pins the limiter at the
+	// bottom while still being throttled.
+	fs.Float64Var(&cfg.minRate, "minrate", 0.1, "slowest the adaptive pacing may go, in requests per second")
 	fs.IntVar(&cfg.perHost, "perhost", 4, "concurrent requests per TLD")
 	fs.IntVar(&cfg.retries, "retries", 3, "retries per lookup on a transient failure")
 	fs.DurationVar(&cfg.timeout, "timeout", 15*time.Second, "per-request timeout")
@@ -222,12 +230,20 @@ func cmdList(args []string) error {
 				continue
 			}
 		}
-		label := r.Domain[:strings.LastIndexByte(r.Domain, '.')]
-		if *minLen > 0 && len(label) < *minLen {
-			continue
-		}
-		if *maxLen > 0 && len(label) > *maxLen {
-			continue
+		if *minLen > 0 || *maxLen > 0 {
+			// The label is the part before the TLD. Guard the index: the store
+			// is a plain text file and nothing stops it being hand-edited.
+			dot := strings.LastIndexByte(r.Domain, '.')
+			if dot < 0 {
+				continue
+			}
+			label := r.Domain[:dot]
+			if *minLen > 0 && len(label) < *minLen {
+				continue
+			}
+			if *maxLen > 0 && len(label) > *maxLen {
+				continue
+			}
 		}
 		drop, anchored, ok := dropDate(r, now)
 		if ok && *days > 0 && drop.After(cutoff) {

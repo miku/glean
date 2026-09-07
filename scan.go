@@ -27,12 +27,29 @@ type limiter struct {
 	lastPen  time.Time // when the rate was last cut
 }
 
-func newLimiter(rate float64) *limiter {
+// newLimiter paces an endpoint at rate, never faster, and no slower than
+// minRate however hard the endpoint pushes back.
+//
+// The floor has to be low. The registries do not enforce a rate so much as a
+// token bucket with a generous burst and a slow refill: PIR serves several
+// hundred requests at 2/s without complaint and then sheds load steadily, and
+// its sustained allowance turns out to sit below one request per second. A
+// floor above that leaves the limiter pinned at the bottom, still throttled,
+// burning retries and marking good domains as failures. Give it room to find
+// the real number instead.
+func newLimiter(rate, minRate float64) *limiter {
 	if rate <= 0 {
 		rate = 1
 	}
+	if minRate <= 0 || minRate > rate {
+		minRate = rate
+	}
 	iv := time.Duration(float64(time.Second) / rate)
-	return &limiter{interval: iv, base: iv, max: 2 * time.Second}
+	return &limiter{
+		interval: iv,
+		base:     iv,
+		max:      time.Duration(float64(time.Second) / minRate),
+	}
 }
 
 // wait blocks until this endpoint's next slot. Jitter keeps several workers
@@ -110,6 +127,7 @@ func (l *limiter) rate() float64 {
 type scanConfig struct {
 	tlds       []string
 	rate       float64
+	minRate    float64
 	perHost    int
 	retries    int
 	timeout    time.Duration
@@ -162,7 +180,7 @@ func runScanJobs(ctx context.Context, st *Store, reg *registry, words []string, 
 		host := shortHost(base)
 		lim, ok := byBase[host]
 		if !ok {
-			lim = newLimiter(cfg.rate)
+			lim = newLimiter(cfg.rate, cfg.minRate)
 			byBase[host] = lim
 		}
 		q := &queue{tld: tld, base: base, lim: lim}
@@ -187,17 +205,20 @@ func runScanJobs(ctx context.Context, st *Store, reg *registry, words []string, 
 		total += len(q.domains)
 	}
 	if cfg.limit > 0 && total > cfg.limit {
-		// Trim proportionally so a -n run still exercises every endpoint.
+		// Trim proportionally so a -n run still exercises every endpoint. The
+		// last queue absorbs the rounding, but only as far as it can: queues
+		// are not the same length, and one may already be empty.
 		remaining := cfg.limit
 		for i, q := range queues {
 			share := cfg.limit * len(q.domains) / total
 			if i == len(queues)-1 || share > remaining {
 				share = remaining
 			}
+			share = min(share, len(q.domains))
 			q.domains = q.domains[:share]
 			remaining -= share
 		}
-		total = cfg.limit
+		total = cfg.limit - remaining
 	}
 
 	fmt.Fprintf(os.Stderr, "%d domains to check, %d up to date, %d in store\n", total, skipped, st.Len())
