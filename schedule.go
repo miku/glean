@@ -11,7 +11,7 @@ import (
 // It walks a fixed path, and only the last two steps of it are interesting:
 //
 //	expiry date
-//	  -> autoRenewPeriod   0-45 days   registrar may still renew, usually does
+//	  -> autoRenewPeriod   0-45 days   registrar may still reverse, usually does not
 //	  -> redemptionPeriod  30 days     only the registrant can restore, for a fee
 //	  -> pendingDelete      5 days     nothing can save it
 //	  -> drops
@@ -21,6 +21,14 @@ import (
 // weeks. "pendingDelete" means the name drops within five days, and the date
 // can be predicted. The store keeps the expiry date anyway, because it is what
 // makes rechecking cheap -- see due().
+//
+// One trap in that first step, and the reason drop dates here are not simply
+// expiry plus eighty days: autoRenewPeriod does not mean "expired". The
+// registry has already renewed the name and pushed its expiry date a year out;
+// the RGP status only records that the registrar has 45 days left to hand the
+// registration back for a refund. A name in autoRenewPeriod carries a future
+// expiry date and is nonetheless a candidate to drop in ten weeks, so its
+// timeline has to be anchored to the renewal event rather than to the term.
 
 const (
 	eppPendingDelete    = "pendingDelete"
@@ -42,14 +50,16 @@ const (
 	stageAvailable  = "available"
 	stagePending    = "pendingDelete"
 	stageRedemption = "redemptionPeriod"
-	stageExpired    = "autoRenewPeriod"
+	stageAutoRenew  = "autoRenewPeriod"
+	stageLapsed     = "lapsed"
 	stageRegistered = "registered"
 	stageUnknown    = "unknown"
 )
 
-// stage places a record on the lifecycle. The EPP codes are authoritative when
-// present; autoRenewPeriod is inferred from a past expiry date as well, since
-// not every registry publishes the RGP status.
+// stage places a record on the lifecycle. The RGP status codes are
+// authoritative when present. stageLapsed is the fallback for a registry that
+// publishes no RGP status at all: a term that ended in the past, with no sign
+// of an auto-renewal, is somewhere in the deletion pipeline.
 func stage(r Record, now time.Time) string {
 	switch r.Status {
 	case statusAvail:
@@ -63,10 +73,10 @@ func stage(r Record, now time.Time) string {
 	case r.Has(eppRedemptionPeriod) || r.Has(eppPendingRestore):
 		return stageRedemption
 	case r.Has(eppAutoRenewPeriod):
-		return stageExpired
+		return stageAutoRenew
 	}
 	if d, ok := parseDate(r.Expiry); ok && d.Before(now) {
-		return stageExpired
+		return stageLapsed
 	}
 	return stageRegistered
 }
@@ -76,45 +86,51 @@ var stageRank = map[string]int{
 	stageAvailable:  0,
 	stagePending:    1,
 	stageRedemption: 2,
-	stageExpired:    3,
-	stageRegistered: 4,
-	stageUnknown:    5,
+	stageLapsed:     3,
+	stageAutoRenew:  4,
+	stageRegistered: 5,
+	stageUnknown:    6,
 }
 
 // dropDate estimates when the name becomes available again, and reports
-// whether the estimate is anchored to an observed status transition (precise
-// to a day or two) or merely projected from the expiry date (soft by weeks,
-// because the length of the auto-renew period is the registrar's choice).
+// whether the estimate is anchored to an observed status transition (good to a
+// day or two) or projected across a stage whose length the registrar chooses
+// (soft by weeks).
 //
-// The anchor is the registry's "last changed" event, which for a domain in
-// redemption or pendingDelete is the transition into that stage.
+// The anchor is the registry's "last changed" event, which for a domain in one
+// of the RGP stages is the transition into that stage. Where there is no
+// anchor and no sound projection, this returns false rather than a plausible
+// wrong date: an expiry date cannot be used once auto-renewal has moved it.
 func dropDate(r Record, now time.Time) (t time.Time, anchored bool, ok bool) {
 	changed, hasChanged := parseDate(r.Changed)
 	expiry, hasExpiry := parseDate(r.Expiry)
+	lapsed := hasExpiry && expiry.Before(now)
 
 	switch stage(r, now) {
 	case stagePending:
 		if hasChanged {
 			return changed.AddDate(0, 0, pendingDelDays), true, true
 		}
-		if hasExpiry {
-			return expiry.AddDate(0, 0, autoRenewDays+redemptionDays+pendingDelDays), false, true
-		}
-		// In pendingDelete with no usable date: it drops within five days.
+		// Whatever the dates say, pendingDelete lasts five days.
 		return now.AddDate(0, 0, pendingDelDays), false, true
 	case stageRedemption:
 		if hasChanged {
 			return changed.AddDate(0, 0, redemptionDays+pendingDelDays), true, true
 		}
-		if hasExpiry {
+		if lapsed {
 			return expiry.AddDate(0, 0, autoRenewDays+redemptionDays+pendingDelDays), false, true
 		}
 		return time.Time{}, false, false
-	case stageExpired:
-		if hasExpiry {
-			return expiry.AddDate(0, 0, autoRenewDays+redemptionDays+pendingDelDays), false, true
+	case stageAutoRenew:
+		// The renewal event started the 45-day clock, so it dates the whole
+		// remaining pipeline. Never the expiry date: the renewal just moved it
+		// a year into the future.
+		if hasChanged {
+			return changed.AddDate(0, 0, autoRenewDays+redemptionDays+pendingDelDays), false, true
 		}
 		return time.Time{}, false, false
+	case stageLapsed:
+		return expiry.AddDate(0, 0, autoRenewDays+redemptionDays+pendingDelDays), false, true
 	}
 	return time.Time{}, false, false
 }
@@ -131,7 +147,7 @@ func due(r Record, now time.Time) time.Time {
 		// Exponential backoff on consecutive failures, from an hour out to a
 		// week, so a name the registry refuses to answer for stops consuming
 		// the rate budget every run.
-		d := time.Hour << min(r.Fails-1, 7)
+		d := time.Hour << min(r.Fails-1, 8)
 		return r.Checked.Add(min(d, 7*24*time.Hour))
 	}
 	switch stage(r, now) {
@@ -140,9 +156,11 @@ func due(r Record, now time.Time) time.Time {
 		return r.Checked.Add(24 * time.Hour)
 	case stageRedemption:
 		return r.Checked.Add(3 * 24 * time.Hour)
-	case stageExpired:
-		// The interesting transition (into redemption) happens somewhere in a
-		// 45-day window, and only the tail of it matters.
+	case stageAutoRenew, stageLapsed:
+		// The transition worth catching -- the registrar handing the
+		// registration back, which starts redemption -- can happen on any day
+		// of the 45-day window. Redemption then lasts 30 days, so a check
+		// every five days cannot miss it and still gives weeks of lead time.
 		return r.Checked.Add(5 * 24 * time.Hour)
 	case stageAvailable:
 		// Someone else may register it; worth confirming before publishing.

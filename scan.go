@@ -23,7 +23,8 @@ type limiter struct {
 	interval time.Duration
 	base     time.Duration // the configured rate, never paced faster than this
 	max      time.Duration
-	ok       int // consecutive successes since the last penalty
+	ok       int       // consecutive successes since the last penalty
+	lastPen  time.Time // when the rate was last cut
 }
 
 func newLimiter(rate float64) *limiter {
@@ -31,7 +32,7 @@ func newLimiter(rate float64) *limiter {
 		rate = 1
 	}
 	iv := time.Duration(float64(time.Second) / rate)
-	return &limiter{interval: iv, base: iv, max: 5 * time.Second}
+	return &limiter{interval: iv, base: iv, max: 2 * time.Second}
 }
 
 // wait blocks until this endpoint's next slot. Jitter keeps several workers
@@ -61,15 +62,21 @@ func (l *limiter) wait(ctx context.Context) error {
 	}
 }
 
-// penalize halves the rate, up to the cap, and pushes the next slot out by any
-// Retry-After the server sent.
+// penalize cuts the rate and pushes the next slot out by any Retry-After the
+// server sent.
+//
+// The cooldown matters more than the ratio. Several workers share an endpoint,
+// so one throttling incident arrives as a burst of failures within a few
+// hundred milliseconds; without it each of them would compound the cut and a
+// single bad second would leave the endpoint crawling for the rest of the run.
+// One incident, one adjustment.
 func (l *limiter) penalize(after time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.ok = 0
-	l.interval *= 2
-	if l.interval > l.max {
-		l.interval = l.max
+	if cooldown := max(l.interval, 500*time.Millisecond); time.Since(l.lastPen) > cooldown {
+		l.lastPen = time.Now()
+		l.interval = min(l.interval*3/2, l.max)
 	}
 	if after > 0 {
 		if t := time.Now().Add(after); t.After(l.next) {
@@ -87,14 +94,11 @@ func (l *limiter) relax() {
 		return
 	}
 	l.ok++
-	if l.ok < 50 {
+	if l.ok < 20 {
 		return
 	}
 	l.ok = 0
-	l.interval = l.interval * 9 / 10
-	if l.interval < l.base {
-		l.interval = l.base
-	}
+	l.interval = max(l.interval*17/20, l.base)
 }
 
 func (l *limiter) rate() float64 {
@@ -151,12 +155,15 @@ func runScanJobs(ctx context.Context, st *Store, reg *registry, words []string, 
 			unknown = append(unknown, tld)
 			continue
 		}
-		// One limiter per endpoint, not per TLD: .com and .net are the same
-		// machine and share a rate budget.
-		lim, ok := byBase[base]
+		// One limiter per host, not per TLD or per base URL. Rate limits are
+		// enforced per client address by the machine answering, and .com and
+		// .net are one machine reached through two paths
+		// (rdap.verisign.com/com/v1 and /net/v1), so they share one budget.
+		host := shortHost(base)
+		lim, ok := byBase[host]
 		if !ok {
 			lim = newLimiter(cfg.rate)
-			byBase[base] = lim
+			byBase[host] = lim
 		}
 		q := &queue{tld: tld, base: base, lim: lim}
 		for _, w := range words {
@@ -338,8 +345,8 @@ func reportProgress(c *counters, total int, start time.Time, lims map[string]*li
 		eta = left.Round(time.Second).String()
 	}
 	var paced []string
-	for base, l := range lims {
-		paced = append(paced, fmt.Sprintf("%s@%.1f/s", shortHost(base), l.rate()))
+	for host, l := range lims {
+		paced = append(paced, fmt.Sprintf("%s@%.1f/s", host, l.rate()))
 	}
 	sort.Strings(paced)
 	fmt.Fprintf(os.Stderr, "%d/%d  %.1f/s  taken=%d avail=%d unknown=%d fail=%d throttle=%d  eta=%s  [%s]\n",

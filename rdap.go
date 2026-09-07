@@ -379,7 +379,7 @@ func retryable(err error) bool {
 	var se statusError
 	if errors.As(err, &se) {
 		switch se.code {
-		case http.StatusTooManyRequests, http.StatusInternalServerError,
+		case http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError,
 			http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 			return true
 		}
@@ -391,10 +391,21 @@ func retryable(err error) bool {
 
 // throttled reports whether the error is the registry asking us to back off,
 // as opposed to a fault. Only these adjust the pacing.
+//
+// 403 belongs here, which is not what RFC 7480 would lead you to expect. The
+// registry operators put a general-purpose load balancer in front of RDAP and
+// it sheds load the way a load balancer does: PIR (.org) answers 403 from an
+// awselb, with an HTML body and no Retry-After, for requests it would have
+// served a second earlier and will serve again a second later. Reading that as
+// a permanent refusal marks a run of good domains as failures and, worse,
+// never slows down -- which is the one thing the server was asking for.
 func throttled(err error) bool {
 	var se statusError
 	if errors.As(err, &se) {
-		return se.code == http.StatusTooManyRequests || se.code == http.StatusServiceUnavailable
+		switch se.code {
+		case http.StatusForbidden, http.StatusTooManyRequests, http.StatusServiceUnavailable:
+			return true
+		}
 	}
 	return false
 }
