@@ -23,11 +23,16 @@ $ go install github.com/miku/expiringsoon@latest
 ## Usage
 
 ```
-$ expiringsoon words          # candidate wordlist from /usr/share/dict/words
+$ expiringsoon sources        # the word lists, and what each one will cost
+$ expiringsoon words          # the candidate labels those lists produce
 $ expiringsoon scan           # look up everything due a check
 $ expiringsoon list           # what is dropping, soonest first
 $ expiringsoon stats          # summarise the store
+$ expiringsoon prune          # drop records no source covers any more
 ```
+
+`expiringsoon help <command>` has the flags and the long form, and
+`expiringsoon completion bash|zsh|fish` prints a completion script.
 
 The first scan is the expensive one. After that, `scan` only looks up what the
 schedule says is due, which settles at a few thousand lookups a day -- see
@@ -160,6 +165,10 @@ At a few hundred thousand records this is tens of megabytes and a full rewrite
 costs well under a second, which buys atomicity and a file that diffs cleanly
 between runs. A database can wait until the data says it is needed.
 
+The word lists are configuration, not data, and live in the XDG *config*
+directory instead -- `~/.config/expiringsoon/sources.d/`. They are inputs you
+write; the store is what the tool accumulates.
+
 ## How it works
 
 Everything is RDAP (RFC 7480/9082/9083), and only RDAP. Every gTLD worth
@@ -187,20 +196,151 @@ entirely.
 
 Standard library only, no dependencies.
 
-## Wordlist
+## Word lists
 
-The default candidate list is `/usr/share/dict/words`, filtered to entries that
-are already lowercase ASCII of the right length. That drops proper nouns, which
-web2 is full of and which make poor generic domains, along with the accented
-and hyphenated entries, which are not registrable as written.
+Out of the box the candidate list is `/usr/share/dict/words`, filtered to
+entries that are already lowercase ASCII of the right length. That drops proper
+nouns, which web2 is full of and which make poor generic domains, along with
+the accented and hyphenated entries, which are not registrable as written.
 
 ```
 $ expiringsoon words -c              # 74947
 $ expiringsoon words -min 4 -max 6   # 27939 shorter, better ones
 ```
 
-`scan -w list.txt` takes a curated list instead, one word per line, `#` for
-comments -- for compound and coined words, which the dictionary will never have.
+That is a fine default and a poor ceiling. Three- and four-letter names are the
+interesting ones and the dictionary has almost none of them, so the list is
+extensible through a directory of small files:
+
+```
+~/.config/expiringsoon/sources.d/
+  10-web2.txt              the system dictionary, as above
+  20-letters3.txt          every three-letter string
+  30-alnum3.txt            three characters, letters and digits
+  40-pronounceable5.txt    five letters, consonant-vowel alternating
+  50-letters4.txt          every four-letter string
+```
+
+`expiringsoon sources -init` writes that directory, with everything past the
+three-letter list switched off and the arithmetic for why in each file. The
+lists have different lifecycles -- web2 has not changed since 1934, a surname
+list is regenerated from a census dump now and then, an enumeration of every
+four-letter string is not a file at all but a loop -- and a directory of small
+files lets each be added, refreshed or disabled without touching the others.
+
+### The file format
+
+A source file is a word list whose *leading* comment block may carry
+directives. Leading only: a list downloaded from elsewhere may have `#` comments
+scattered through it, and none of them should be able to change how the file is
+read.
+
+```
+# 30-airport-codes.txt -- IATA, three letters, high recall
+# tlds: com
+# priority: 30
+ord
+lhr
+nrt
+```
+
+A file may instead name a generator, and carry no words at all:
+
+```
+# 20-letters3.txt
+# generate: letters 3
+# tlds: com,net,org,xyz
+```
+
+`generate:` takes `letters N`, `alnum N`, or `pattern` over the classes `C`
+(consonant), `V` (vowel), `L` (letter), `D` (digit) and `N` (alphanumeric) --
+so `pattern CVCVC` is the pronounceable five-letter names.
+
+Or it may point at a list that lives somewhere else and is maintained by
+something else, which is how a list that updates on its own schedule stays that
+way. The stub in `sources.d` carries the policy; the target is somebody else's
+business:
+
+```
+# 40-surnames.txt -- refreshed nightly by cron, do not edit the target
+# include: /var/lib/wordlists/census-surnames.txt
+# fold: false
+# min: 4
+# tlds: com,net
+```
+
+| directive   | meaning                                                          |
+| ----------- | ---------------------------------------------------------------- |
+| `tlds`      | TLDs to pair this list with; defaults to `scan -tlds`              |
+| `priority`  | lower is scanned first; defaults to the `NN-` filename prefix      |
+| `generate`  | enumerate rather than read a file                                  |
+| `include`   | read labels from a file elsewhere                                  |
+| `min`, `max`| label length bounds                                                |
+| `fold`      | lowercase entries and keep them (default), or drop capitalised ones |
+| `enabled`   | `false` leaves the file in place but out of the scan               |
+
+### What it costs
+
+The one question worth answering before enabling a list is what the first pass
+will cost, which is what `sources` is for:
+
+```
+$ expiringsoon sources -all
+SOURCE                PRI  SPEC                   LABELS  TLDS             DOMAINS  NEW      DUE   FIRST PASS
+web2                  10   /usr/share/dict/words  74947   com,net,org,xyz  299788   0        1674  -
+letters3              20   letters 3              17576   com,net,org,xyz  70304    70304    0     3.3h
+alnum3 (off)          30   alnum 3                46656   com,net,org,xyz  116320   116320   0     5.4h
+pronounceable5 (off)  40   pattern CVCVC          231525  com              229618   229618   0     21.3h
+letters4 (off)        50   letters 4              456976  com              452616   452616   0     41.9h
+```
+
+`NEW` is the column to read, and it is marginal: labels this source contributes
+that are not already in the store and were not already contributed by an
+earlier source. `alnum3` yields 46,656 labels but only 116,320 new domains
+rather than 186,624, because `letters3` already covered 17,576 of them.
+`FIRST PASS` is that divided by the rate the registry will tolerate, counting
+`.com` and `.net` against one budget because they are one machine.
+
+The recurring cost is unrelated and much smaller. A registered name with a
+distant expiry date is not looked at again until shortly before that date, so
+the steady state is a few thousand lookups a day almost regardless of how long
+the list is -- see [Why the second scan is cheap](#why-the-second-scan-is-cheap).
+What a big list costs is the one-off.
+
+### Spending a short budget
+
+`scan -n` spends its budget in source priority order rather than spreading it
+evenly. This matters as soon as there is more than one list: an even split
+gives the largest share to the largest source, which is the four-letter
+enumeration, and a nightly run that grinds through that while the curated
+lists go unchecked has it backwards. A level is taken whole, and only the level
+the budget runs out on is split across the endpoints -- so a short run still
+touches every registry rather than finishing one TLD and never reaching the
+rest.
+
+```
+$ expiringsoon scan -n 50000      # a night's worth, best lists first
+```
+
+### Provenance
+
+`list -source letters3` filters by which list a name came from. That is
+answered by asking the source whether it contains the label, not by a tag in
+the store: the store stays a record of what the registries said, and editing a
+word list never leaves stale provenance behind in 300k records.
+
+Deleting or narrowing a list leaves records nothing covers any more. They cost
+nothing -- `scan` stops scheduling them, so they are never looked up again --
+but `stats` counts them and `prune` removes them:
+
+```
+$ expiringsoon prune          # dry run, reports what it would delete
+$ expiringsoon prune -f       # actually delete
+```
+
+`scan -w list.txt` still takes a single curated list and bypasses `sources.d`
+entirely, and with no `sources.d` at all the tool behaves exactly as it did
+before the directory existed: web2, four to eight letters, four TLDs.
 
 ## License
 
