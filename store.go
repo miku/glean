@@ -145,6 +145,22 @@ func (s *Store) Put(r Record) {
 	s.dirty = true
 }
 
+// Delete removes records. Marking the store dirty even when nothing matched
+// is harmless: Flush rewrites the whole file anyway.
+func (s *Store) Delete(domains ...string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, d := range domains {
+		if _, ok := s.recs[d]; ok {
+			delete(s.recs, d)
+			n++
+		}
+	}
+	s.dirty = true
+	return n
+}
+
 func (s *Store) Len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

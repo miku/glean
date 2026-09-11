@@ -146,11 +146,45 @@ type counters struct {
 }
 
 // queue is one TLD's worth of work, bound to the endpoint that serves it.
+//
+// segs records which stretch of domains came from which priority level. The
+// queue is built in source priority order, so a level is always one contiguous
+// run, and trimming for -n can hand out the budget by priority without
+// re-deriving where anything came from.
 type queue struct {
 	tld     string
 	base    string
 	lim     *limiter
 	domains []string
+	segs    []segment
+}
+
+type segment struct {
+	prio   int
+	lo, hi int
+}
+
+// at returns the stretch of this queue contributed at the given priority.
+func (q *queue) at(prio int) []string {
+	for _, s := range q.segs {
+		if s.prio == prio {
+			return q.domains[s.lo:s.hi]
+		}
+	}
+	return nil
+}
+
+// mark closes off a segment at prio ending at the current length, merging with
+// the previous one if the last source had the same priority.
+func (q *queue) mark(prio, lo int) {
+	if lo == len(q.domains) {
+		return
+	}
+	if n := len(q.segs); n > 0 && q.segs[n-1].prio == prio {
+		q.segs[n-1].hi = len(q.domains)
+		return
+	}
+	q.segs = append(q.segs, segment{prio: prio, lo: lo, hi: len(q.domains)})
 }
 
 // scan looks up every due domain and folds the answers into the store.
@@ -158,8 +192,21 @@ type queue struct {
 // Work is grouped by endpoint rather than by word, because pacing is a property
 // of the registry: .com and .net share one host, and a flat worker pool would
 // aim most of its concurrency at whoever answers slowest.
-func runScanJobs(ctx context.Context, st *Store, reg *registry, words []string, cfg scanConfig) error {
+func runScanJobs(ctx context.Context, st *Store, reg *registry, srcs []*Source, cfg scanConfig) error {
 	now := time.Now()
+
+	// Every TLD any source asks for, in a stable order.
+	var tlds []string
+	seenTLD := make(map[string]bool)
+	for _, s := range srcs {
+		for _, t := range s.tldsOr(cfg.tlds) {
+			if !seenTLD[t] {
+				seenTLD[t] = true
+				tlds = append(tlds, t)
+			}
+		}
+	}
+	sort.Strings(tlds)
 
 	var (
 		queues  []*queue
@@ -167,7 +214,7 @@ func runScanJobs(ctx context.Context, st *Store, reg *registry, words []string, 
 		skipped int
 		unknown []string
 	)
-	for _, tld := range cfg.tlds {
+	for _, tld := range tlds {
 		base, ok := reg.base(tld)
 		if !ok {
 			unknown = append(unknown, tld)
@@ -184,15 +231,39 @@ func runScanJobs(ctx context.Context, st *Store, reg *registry, words []string, 
 			byBase[host] = lim
 		}
 		q := &queue{tld: tld, base: base, lim: lim}
-		for _, w := range words {
-			domain := w + "." + tld
-			if !cfg.force {
-				if rec, ok := st.Get(domain); ok && due(rec, now).After(now) {
-					skipped++
-					continue
-				}
+
+		// Deduplicate labels within this TLD: sources overlap heavily -- an
+		// enumeration of four-letter strings contains most of web2's short
+		// words -- and the same domain must not be looked up twice.
+		//
+		// One TLD at a time, so this set is one TLD's worth of labels rather
+		// than every domain in the run. Across four TLDs and a four-letter
+		// enumeration that is the difference between 500k entries and 2M.
+		seen := make(map[string]bool)
+		for _, s := range srcs {
+			if !hasTLD(s.tldsOr(cfg.tlds), tld) {
+				continue
 			}
-			q.domains = append(q.domains, domain)
+			lo := len(q.domains)
+			err := s.Each(func(w string) bool {
+				if seen[w] {
+					return true
+				}
+				seen[w] = true
+				domain := w + "." + tld
+				if !cfg.force {
+					if rec, ok := st.Get(domain); ok && due(rec, now).After(now) {
+						skipped++
+						return true
+					}
+				}
+				q.domains = append(q.domains, domain)
+				return true
+			})
+			if err != nil {
+				return fmt.Errorf("%s: %w", s.Name, err)
+			}
+			q.mark(s.Priority, lo)
 		}
 		queues = append(queues, q)
 	}
@@ -205,20 +276,11 @@ func runScanJobs(ctx context.Context, st *Store, reg *registry, words []string, 
 		total += len(q.domains)
 	}
 	if cfg.limit > 0 && total > cfg.limit {
-		// Trim proportionally so a -n run still exercises every endpoint. The
-		// last queue absorbs the rounding, but only as far as it can: queues
-		// are not the same length, and one may already be empty.
-		remaining := cfg.limit
-		for i, q := range queues {
-			share := cfg.limit * len(q.domains) / total
-			if i == len(queues)-1 || share > remaining {
-				share = remaining
-			}
-			share = min(share, len(q.domains))
-			q.domains = q.domains[:share]
-			remaining -= share
+		trimByPriority(queues, cfg.limit)
+		total = 0
+		for _, q := range queues {
+			total += len(q.domains)
 		}
-		total = cfg.limit - remaining
 	}
 
 	fmt.Fprintf(os.Stderr, "%d domains to check, %d up to date, %d in store\n", total, skipped, st.Len())
@@ -297,6 +359,89 @@ func runScanJobs(ctx context.Context, st *Store, reg *registry, words []string, 
 			reportProgress(&c, total, start, byBase, false)
 		}
 	}
+}
+
+// trimByPriority spends a -n budget in source order rather than spreading it
+// evenly over the queues.
+//
+// The distinction matters as soon as there is more than one word list. A
+// proportional trim gives the largest source the largest share, which is
+// exactly backwards: the largest source is the four-letter enumeration, and a
+// nightly run that spends its budget there while the curated lists go
+// unchecked has the priorities upside down. Here a level is either taken whole
+// or, if it is the level the budget runs out on, split across the endpoints so
+// that a short run still exercises all of them rather than finishing one TLD
+// and never touching the rest.
+func trimByPriority(queues []*queue, budget int) {
+	kept := make([][]string, len(queues))
+	for _, prio := range priorities(queues) {
+		if budget <= 0 {
+			break
+		}
+		level := 0
+		for _, q := range queues {
+			level += len(q.at(prio))
+		}
+		if level == 0 {
+			continue
+		}
+		if level <= budget {
+			for i, q := range queues {
+				kept[i] = append(kept[i], q.at(prio)...)
+			}
+			budget -= level
+			continue
+		}
+		// The budget runs out here. Proportional shares, then hand the
+		// rounding remainder round-robin to whoever still has work at this
+		// level, so the budget is spent exactly.
+		share := make([]int, len(queues))
+		spent := 0
+		for i, q := range queues {
+			share[i] = budget * len(q.at(prio)) / level
+			spent += share[i]
+		}
+		for spent < budget {
+			progressed := false
+			for i, q := range queues {
+				if spent == budget {
+					break
+				}
+				if share[i] < len(q.at(prio)) {
+					share[i]++
+					spent++
+					progressed = true
+				}
+			}
+			if !progressed {
+				break
+			}
+		}
+		for i, q := range queues {
+			kept[i] = append(kept[i], q.at(prio)[:share[i]]...)
+		}
+		budget = 0
+	}
+	for i, q := range queues {
+		q.domains = kept[i]
+		q.segs = nil // the segments describe the untrimmed queue
+	}
+}
+
+// priorities lists the distinct priority levels present, most eager first.
+func priorities(queues []*queue) []int {
+	seen := make(map[int]bool)
+	var out []int
+	for _, q := range queues {
+		for _, s := range q.segs {
+			if !seen[s.prio] {
+				seen[s.prio] = true
+				out = append(out, s.prio)
+			}
+		}
+	}
+	sort.Ints(out)
+	return out
 }
 
 // lookupWithRetry performs one lookup, retrying transient failures. A failure

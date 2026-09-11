@@ -21,6 +21,21 @@ func fakeRegistry(url string, tlds ...string) *registry {
 	return r
 }
 
+// wordSource wraps a literal list as a source, for the tests that care about
+// the scan rather than about where labels come from.
+func wordSource(words ...string) []*Source {
+	s := &Source{Name: "test", Priority: defaultPriority, Enabled: true, fold: true}
+	s.set = make(map[string]bool, len(words))
+	for _, w := range words {
+		if !s.set[w] {
+			s.set[w] = true
+			s.words = append(s.words, w)
+		}
+	}
+	s.once.Do(func() {}) // already loaded; do not go looking for a file
+	return []*Source{s}
+}
+
 func testScanConfig(tlds ...string) scanConfig {
 	return scanConfig{
 		tlds:       tlds,
@@ -54,7 +69,7 @@ func TestScanRecordsVerdicts(t *testing.T) {
 	reg := fakeRegistry(srv.URL, "com", "net")
 	words := []string{"taken", "free"}
 
-	if err := runScanJobs(context.Background(), st, reg, words, testScanConfig("com", "net")); err != nil {
+	if err := runScanJobs(context.Background(), st, reg, wordSource(words...), testScanConfig("com", "net")); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Flush(); err != nil {
@@ -96,7 +111,7 @@ func TestScanSkipsWhatIsNotDue(t *testing.T) {
 		Checked: time.Now().Add(-24 * time.Hour)})
 
 	cfg := testScanConfig("com")
-	if err := runScanJobs(context.Background(), st, fakeRegistry(srv.URL, "com"), []string{"sleepy", "fresh"}, cfg); err != nil {
+	if err := runScanJobs(context.Background(), st, fakeRegistry(srv.URL, "com"), wordSource("sleepy", "fresh"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	if got := hits.Load(); got != 1 {
@@ -106,7 +121,7 @@ func TestScanSkipsWhatIsNotDue(t *testing.T) {
 	// -force ignores the schedule.
 	cfg.force = true
 	hits.Store(0)
-	if err := runScanJobs(context.Background(), st, fakeRegistry(srv.URL, "com"), []string{"sleepy", "fresh"}, cfg); err != nil {
+	if err := runScanJobs(context.Background(), st, fakeRegistry(srv.URL, "com"), wordSource("sleepy", "fresh"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	if got := hits.Load(); got != 2 {
@@ -137,7 +152,7 @@ func TestScanLimitDoesNotOverrunAShortQueue(t *testing.T) {
 	cfg := testScanConfig("com", "net", "org")
 	cfg.limit = 12 // of 13 due: com 6, net 6, org 1
 	reg := fakeRegistry(srv.URL, "com", "net", "org")
-	if err := runScanJobs(context.Background(), st, reg, words, cfg); err != nil {
+	if err := runScanJobs(context.Background(), st, reg, wordSource(words...), cfg); err != nil {
 		t.Fatal(err)
 	}
 	if got := hits.Load(); got > int64(cfg.limit) {
@@ -162,7 +177,7 @@ func TestScanFailureIsRecordedWithoutLosingWhatWeKnew(t *testing.T) {
 
 	cfg := testScanConfig("com")
 	cfg.retries = 0
-	if err := runScanJobs(context.Background(), st, fakeRegistry(srv.URL, "com"), []string{"known"}, cfg); err != nil {
+	if err := runScanJobs(context.Background(), st, fakeRegistry(srv.URL, "com"), wordSource("known"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := st.Get("known.com")
@@ -184,7 +199,7 @@ func TestScanFailureIsRecordedWithoutLosingWhatWeKnew(t *testing.T) {
 func TestScanUnknownTLDIsAnError(t *testing.T) {
 	st, _ := openStore(filepath.Join(t.TempDir(), "d.jsonl.gz"))
 	reg := fakeRegistry("http://127.0.0.1:1", "com")
-	err := runScanJobs(context.Background(), st, reg, []string{"alpha"}, testScanConfig("com", "nosuchtld"))
+	err := runScanJobs(context.Background(), st, reg, wordSource("alpha"), testScanConfig("com", "nosuchtld"))
 	if err == nil || !strings.Contains(err.Error(), "nosuchtld") {
 		t.Errorf("err = %v, want it to name the unresolvable TLD", err)
 	}
@@ -212,7 +227,7 @@ func TestScanStopsOnCancellation(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runScanJobs(ctx, st, fakeRegistry(srv.URL, "com"), words, cfg)
+		runScanJobs(ctx, st, fakeRegistry(srv.URL, "com"), wordSource(words...), cfg)
 	}()
 	select {
 	case <-done:
@@ -226,5 +241,107 @@ func TestScanStopsOnCancellation(t *testing.T) {
 	}
 	if st.Len() >= len(words) {
 		t.Errorf("scan completed %d of %d despite cancellation", st.Len(), len(words))
+	}
+}
+
+// TestScanDeduplicatesAcrossSources is the property that makes overlapping
+// lists safe to stack: a four-letter enumeration contains most of web2's short
+// words, and the same domain must not be looked up twice.
+func TestScanDeduplicatesAcrossSources(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	st, err := openStore(filepath.Join(t.TempDir(), "d.jsonl.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two sources sharing two of their three labels.
+	a := wordSource("alpha", "beta", "gamma")[0]
+	a.Name, a.Priority = "a", 10
+	b := wordSource("beta", "gamma", "delta")[0]
+	b.Name, b.Priority = "b", 20
+
+	cfg := testScanConfig("com")
+	if err := runScanJobs(context.Background(), st, fakeRegistry(srv.URL, "com"), []*Source{a, b}, cfg); err != nil {
+		t.Fatal(err)
+	}
+	// Four distinct labels, not six.
+	if got := st.Len(); got != 4 {
+		t.Errorf("store has %d records, want 4 distinct domains", got)
+	}
+	if got := hits.Load(); got != 4 {
+		t.Errorf("made %d requests, want 4: an overlapping label was looked up twice", got)
+	}
+}
+
+// TestScanUsesPerSourceTLDs checks that a source naming its own TLDs is not
+// crossed with every other source's.
+func TestScanUsesPerSourceTLDs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	st, err := openStore(filepath.Join(t.TempDir(), "d.jsonl.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	comOnly := wordSource("alpha")[0]
+	comOnly.Name, comOnly.TLDs = "comonly", []string{"com"}
+	both := wordSource("beta")[0]
+	both.Name = "both" // no TLDs of its own: takes the fallback
+
+	cfg := testScanConfig("com", "net")
+	if err := runScanJobs(context.Background(), st, fakeRegistry(srv.URL, "com", "net"), []*Source{comOnly, both}, cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{"alpha.com", "beta.com", "beta.net"} {
+		if _, ok := st.Get(d); !ok {
+			t.Errorf("%s missing from the store", d)
+		}
+	}
+	if _, ok := st.Get("alpha.net"); ok {
+		t.Error("alpha.net was scanned, but its source names com only")
+	}
+}
+
+// TestScanLimitFavoursThePriorSource is the -n behaviour end to end.
+func TestScanLimitFavoursThePriorSource(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	st, err := openStore(filepath.Join(t.TempDir(), "d.jsonl.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	small := wordSource("aa", "ab")[0]
+	small.Name, small.Priority = "small", 10
+	var bigWords []string
+	for i := 0; i < 100; i++ {
+		bigWords = append(bigWords, fmt.Sprintf("big%02d", i))
+	}
+	big := wordSource(bigWords...)[0]
+	big.Name, big.Priority = "big", 50
+
+	cfg := testScanConfig("com")
+	cfg.limit = 5
+	if err := runScanJobs(context.Background(), st, fakeRegistry(srv.URL, "com"), []*Source{small, big}, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.Len(); got != 5 {
+		t.Fatalf("store has %d records, want the 5 the budget allowed", got)
+	}
+	// The whole of the small list must be in there; a proportional split would
+	// have given it 5*2/102 = 0.
+	for _, d := range []string{"aa.com", "ab.com"} {
+		if _, ok := st.Get(d); !ok {
+			t.Errorf("%s missing: the budget skipped the higher-priority source", d)
+		}
 	}
 }
