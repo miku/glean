@@ -24,7 +24,7 @@ func main() {
 	case err == errUsage:
 		osExit(2)
 	case err != nil:
-		fmt.Fprintf(os.Stderr, "expiringsoon: %v\n", err)
+		fmt.Fprintf(os.Stderr, "rgpstat: %v\n", err)
 		osExit(1)
 	}
 }
@@ -90,7 +90,7 @@ func resolveSources(dir string, names []string, wordFile string, o wordOpts, tld
 	}
 	if len(all) == 0 {
 		if len(names) > 0 {
-			return nil, fmt.Errorf("no sources in %s; run \"expiringsoon sources -init\"", dir)
+			return nil, fmt.Errorf("no sources in %s; run \"rgpstat sources -init\"", dir)
 		}
 		return []*Source{legacySource(o, tlds)}, nil
 	}
@@ -536,7 +536,7 @@ func statsCmd() *command {
 			fmt.Fprintf(w, "records\t%d\n", len(recs))
 			fmt.Fprintf(w, "due now\t%d\n", dueNow)
 			if orphans, err := countOrphans(recs, sourcesDir, splitTLDs(tlds)); err == nil && orphans > 0 {
-				fmt.Fprintf(w, "orphaned\t%d\t(no longer in any source; see \"expiringsoon prune\")\n", orphans)
+				fmt.Fprintf(w, "orphaned\t%d\t(no longer in any source; see \"rgpstat prune\")\n", orphans)
 			}
 			if !oldest.IsZero() {
 				fmt.Fprintf(w, "checked\t%s .. %s\n", oldest.Format(time.DateOnly), newest.Format(time.DateOnly))
@@ -712,7 +712,7 @@ looked at again until shortly before that date.`,
 			if len(srcs) == 0 {
 				fmt.Printf("no sources in %s\n", sourcesDir)
 				fmt.Printf("falling back to %s, %d-%d letters, .{%s}\n", defaultDict, 4, 8, tlds)
-				fmt.Println("run \"expiringsoon sources -init\" to write a starter directory")
+				fmt.Println("run \"rgpstat sources -init\" to write a starter directory")
 				return nil
 			}
 			st, err := openStore(store)
@@ -876,7 +876,7 @@ var starterSources = []struct {
 	body string
 }{
 	{"10-web2.txt", `# The system dictionary: web2, Webster's Second International, whose 1934
-# copyright has elapsed. This file reproduces what expiringsoon did before
+# copyright has elapsed. This file reproduces what rgpstat did before
 # sources.d existed.
 #
 # Turning folding off drops capitalized entries rather than lowercasing
@@ -956,7 +956,7 @@ func initSources(dir string) error {
 	}
 	fmt.Printf("%s: %d written, %d already there\n", dir, wrote, skipped)
 	fmt.Println("enabled by default: web2 (as before) and every three-letter string")
-	fmt.Println("run \"expiringsoon sources\" to see what the rest would cost")
+	fmt.Println("run \"rgpstat sources\" to see what the rest would cost")
 	return nil
 }
 

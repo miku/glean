@@ -28,7 +28,10 @@ const bootstrapURL = "https://data.iana.org/rdap/dns.json"
 
 // userAgent identifies the tool to registries. RDAP servers throttle on it and
 // an anonymous scraper is throttled hardest.
-const userAgent = "expiringsoon/0.1 (+https://github.com/miku/expiringsoon)"
+//
+// Built from the version constant rather than spelled out, so a release cannot
+// quietly go on announcing an old version to every registry it talks to.
+var userAgent = "rgpstat/" + version + " (+https://github.com/miku/rgpstat)"
 
 // fallbackBases lets a scan start when IANA is unreachable. These four are the
 // default TLD set and they have not moved in years, but the bootstrap file is

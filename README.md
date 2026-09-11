@@ -1,13 +1,20 @@
-# expiringsoon
+# rgpstat
 
 A daily curated list of soon expiring domain names.
 
-Joins a static wordlist with a live signal and compiles the interesting part:
-dictionary words whose `.com`, `.net`, `.org` or `.xyz` registration is on its
-way to being deleted.
+Joins a wordlist with a live signal and compiles the interesting part: names
+whose `.com`, `.net`, `.org` or `.xyz` registration is actually on its way to
+being deleted.
+
+The name is the premise. A domain does not become available on its expiry date
+-- it walks the Registry Grace Period pipeline of RFC 3915, and a list built on
+"expires next Tuesday" is close to useless. What this reports on is the RGP
+status codes, which say where in that pipeline a name really is. Hence
+`rgpstat`, in the manner of `vmstat` and `netstat`: a running report on a
+system's state rather than a one-shot query.
 
 ```
-$ expiringsoon list
+$ rgpstat list
 DOMAIN        STAGE             DROPS        EXPIRY      REGISTRAR
 lummox.net    available         -            -           -
 quiddity.com  pendingDelete     2026-09-11   2026-06-27  GoDaddy.com, LLC
@@ -17,30 +24,30 @@ fustian.org   redemptionPeriod  2026-10-06   2026-07-01  NameCheap, Inc.
 ## Installation
 
 ```
-$ go install github.com/miku/expiringsoon@latest
+$ go install github.com/miku/rgpstat@latest
 ```
 
 ## Usage
 
 ```
-$ expiringsoon sources        # the word lists, and what each one will cost
-$ expiringsoon words          # the candidate labels those lists produce
-$ expiringsoon scan           # look up everything due a check
-$ expiringsoon list           # what is dropping, soonest first
-$ expiringsoon stats          # summarise the store
-$ expiringsoon prune          # drop records no source covers any more
+$ rgpstat sources        # the word lists, and what each one will cost
+$ rgpstat words          # the candidate labels those lists produce
+$ rgpstat scan           # look up everything due a check
+$ rgpstat list           # what is dropping, soonest first
+$ rgpstat stats          # summarise the store
+$ rgpstat prune          # drop records no source covers any more
 ```
 
-`expiringsoon help <command>` has the flags and the long form, and
-`expiringsoon completion bash|zsh|fish` prints a completion script.
+`rgpstat help <command>` has the flags and the long form, and
+`rgpstat completion bash|zsh|fish` prints a completion script.
 
 The first scan is the expensive one. After that, `scan` only looks up what the
 schedule says is due, which settles at a few thousand lookups a day -- see
 [Why the second scan is cheap](#why-the-second-scan-is-cheap).
 
 ```
-$ expiringsoon scan
-74947 words x 4 TLDs, 3 req/s per endpoint, store ~/.local/state/expiringsoon/domains.jsonl.gz
+$ rgpstat scan
+74947 words x 4 TLDs, 3 req/s per endpoint, store ~/.local/state/rgpstat/domains.jsonl.gz
 299788 domains to check, 0 up to date, 0 in store
 1761/299788  8.9/s  taken=1363 avail=334 unknown=0 fail=0 throttle=0  eta=9h18m
 ```
@@ -155,7 +162,7 @@ than the cache directory -- a wiped cache is an inconvenience, a wiped scan is
 five hours.
 
 ```
-$ zcat ~/.local/state/expiringsoon/domains.jsonl.gz | head -1
+$ zcat ~/.local/state/rgpstat/domains.jsonl.gz | head -1
 {"domain":"aalii.com","status":"taken","epp":["clientTransferProhibited"],
  "expiry":"2027-06-23","changed":"2026-05-27",
  "registrar":"TurnCommerce, Inc. DBA NameBright.com","checked":"2026-09-07T12:23:14Z"}
@@ -166,7 +173,7 @@ costs well under a second, which buys atomicity and a file that diffs cleanly
 between runs. A database can wait until the data says it is needed.
 
 The word lists are configuration, not data, and live in the XDG *config*
-directory instead -- `~/.config/expiringsoon/sources.d/`. They are inputs you
+directory instead -- `~/.config/rgpstat/sources.d/`. They are inputs you
 write; the store is what the tool accumulates.
 
 ## How it works
@@ -204,8 +211,8 @@ nouns, which web2 is full of and which make poor generic domains, along with
 the accented and hyphenated entries, which are not registrable as written.
 
 ```
-$ expiringsoon words -c              # 74947
-$ expiringsoon words -min 4 -max 6   # 27939 shorter, better ones
+$ rgpstat words -c              # 74947
+$ rgpstat words -min 4 -max 6   # 27939 shorter, better ones
 ```
 
 That is a fine default and a poor ceiling. Three- and four-letter names are the
@@ -213,7 +220,7 @@ interesting ones and the dictionary has almost none of them, so the list is
 extensible through a directory of small files:
 
 ```
-~/.config/expiringsoon/sources.d/
+~/.config/rgpstat/sources.d/
   10-web2.txt              the system dictionary, as above
   20-letters3.txt          every three-letter string
   30-alnum3.txt            three characters, letters and digits
@@ -221,7 +228,7 @@ extensible through a directory of small files:
   50-letters4.txt          every four-letter string
 ```
 
-`expiringsoon sources -init` writes that directory, with everything past the
+`rgpstat sources -init` writes that directory, with everything past the
 three-letter list switched off and the arithmetic for why in each file. The
 lists have different lifecycles -- web2 has not changed since 1934, a surname
 list is regenerated from a census dump now and then, an enumeration of every
@@ -285,7 +292,7 @@ The one question worth answering before enabling a list is what the first pass
 will cost, which is what `sources` is for:
 
 ```
-$ expiringsoon sources -all
+$ rgpstat sources -all
 SOURCE                PRI  SPEC                   LABELS  TLDS             DOMAINS  NEW      DUE   FIRST PASS
 web2                  10   /usr/share/dict/words  74947   com,net,org,xyz  299788   0        1674  -
 letters3              20   letters 3              17576   com,net,org,xyz  70304    70304    0     3.3h
@@ -319,7 +326,7 @@ touches every registry rather than finishing one TLD and never reaching the
 rest.
 
 ```
-$ expiringsoon scan -n 50000      # a night's worth, best lists first
+$ rgpstat scan -n 50000      # a night's worth, best lists first
 ```
 
 ### Provenance
@@ -334,8 +341,8 @@ nothing -- `scan` stops scheduling them, so they are never looked up again --
 but `stats` counts them and `prune` removes them:
 
 ```
-$ expiringsoon prune          # dry run, reports what it would delete
-$ expiringsoon prune -f       # actually delete
+$ rgpstat prune          # dry run, reports what it would delete
+$ rgpstat prune -f       # actually delete
 ```
 
 `scan -w list.txt` still takes a single curated list and bypasses `sources.d`

@@ -1,3 +1,3 @@
-module github.com/miku/expiringsoon
+module github.com/miku/rgpstat
 
 go 1.27.1

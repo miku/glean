@@ -86,7 +86,7 @@ func defaultSourcesDir() string {
 		}
 		dir = filepath.Join(home, ".config")
 	}
-	return filepath.Join(dir, "expiringsoon", "sources.d")
+	return filepath.Join(dir, "rgpstat", "sources.d")
 }
 
 // loadSources reads every source file in dir, in priority then name order. A

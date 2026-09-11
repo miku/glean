@@ -47,9 +47,9 @@ type command struct {
 // usageLine is what the command is called with.
 func (c *command) usageLine() string {
 	if c.args == "" {
-		return "expiringsoon " + c.name
+		return "rgpstat " + c.name
 	}
-	return "expiringsoon " + c.name + " " + c.args
+	return "rgpstat " + c.name + " " + c.args
 }
 
 // help prints the long form: usage, prose, then the flags by group.
@@ -202,8 +202,8 @@ func find(cmds []*command, name string) *command {
 }
 
 func rootUsage(cmds []*command, w io.Writer) {
-	fmt.Fprintf(w, "expiringsoon %s -- dictionary-word domains that are about to drop\n\n", version)
-	fmt.Fprintf(w, "Usage: expiringsoon <command> [flags]\n\n")
+	fmt.Fprintf(w, "rgpstat %s -- watch domains through the deletion lifecycle\n\n", version)
+	fmt.Fprintf(w, "Usage: rgpstat <command> [flags]\n\n")
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
 	for _, c := range cmds {
 		if !c.hidden {
@@ -212,8 +212,8 @@ func rootUsage(cmds []*command, w io.Writer) {
 	}
 	tw.Flush()
 	fmt.Fprintf(w, `
-  expiringsoon help <command>     flags and the long form
-  expiringsoon completion zsh     shell completion
+  rgpstat help <command>     flags and the long form
+  rgpstat completion zsh     shell completion
 
 Word lists live in
   %s
@@ -241,7 +241,7 @@ func unknownCommand(cmds []*command, name string) error {
 	if best != "" {
 		return fmt.Errorf("unknown command %q; did you mean %q?", name, best)
 	}
-	return fmt.Errorf("unknown command %q; run \"expiringsoon help\"", name)
+	return fmt.Errorf("unknown command %q; run \"rgpstat help\"", name)
 }
 
 // editDistance is Levenshtein with a rolling row.
@@ -281,32 +281,32 @@ func editDistance(a, b string) int {
 // around it. bash 3.2 -- which is still what macOS ships -- joins
 // "${arr[@]:1}" with IFS instead of keeping the words separate, so setting
 // IFS first collapses the whole command line into one argument.
-const bashCompletion = `_expiringsoon() {
+const bashCompletion = `_rgpstat() {
     local out
-    out=$(expiringsoon __complete "${COMP_WORDS[@]:1}")
+    out=$(rgpstat __complete "${COMP_WORDS[@]:1}")
     local IFS=$'\n'
     COMPREPLY=( $out )
 }
-complete -o default -F _expiringsoon expiringsoon
+complete -o default -F _rgpstat rgpstat
 `
 
-const zshCompletion = `_expiringsoon() {
+const zshCompletion = `_rgpstat() {
     local -a out
-    out=("${(@f)$(expiringsoon __complete "${(@)words[2,CURRENT]}")}")
+    out=("${(@f)$(rgpstat __complete "${(@)words[2,CURRENT]}")}")
     if (( ${#out} == 0 )) || [[ -z "${out[1]}" ]]; then
         _files
         return
     fi
     compadd -- "${(@)out}"
 }
-compdef _expiringsoon expiringsoon
+compdef _rgpstat rgpstat
 `
 
-const fishCompletion = `function __expiringsoon_complete
+const fishCompletion = `function __rgpstat_complete
     set -l tokens (commandline -opc) (commandline -ct)
-    expiringsoon __complete $tokens[2..-1]
+    rgpstat __complete $tokens[2..-1]
 end
-complete -c expiringsoon -f -a '(__expiringsoon_complete)'
+complete -c rgpstat -f -a '(__rgpstat_complete)'
 `
 
 // completions answers one completion request. words is everything typed after
@@ -400,15 +400,15 @@ func completionCmd() *command {
 		long: `Print a completion script for the named shell. It delegates back to
 this binary, so the completions stay correct as sources.d changes.
 
-  bash    eval "$(expiringsoon completion bash)"   (or drop it in
+  bash    eval "$(rgpstat completion bash)"   (or drop it in
           /etc/bash_completion.d, or ~/.local/share/bash-completion/completions)
-  zsh     expiringsoon completion zsh > ~/.zfunc/_expiringsoon
+  zsh     rgpstat completion zsh > ~/.zfunc/_rgpstat
           with ~/.zfunc on $fpath before compinit
-  fish    expiringsoon completion fish > ~/.config/fish/completions/expiringsoon.fish`,
+  fish    rgpstat completion fish > ~/.config/fish/completions/rgpstat.fish`,
 		register: func(fs *flag.FlagSet) {},
 		run: func(args []string) error {
 			if len(args) != 1 {
-				return fmt.Errorf("usage: expiringsoon completion bash|zsh|fish")
+				return fmt.Errorf("usage: rgpstat completion bash|zsh|fish")
 			}
 			switch args[0] {
 			case "bash":

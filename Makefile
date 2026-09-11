@@ -1,4 +1,4 @@
-BINARY  := expiringsoon
+BINARY  := rgpstat
 GO      := go
 GOFLAGS := -trimpath -ldflags='-s -w'
 

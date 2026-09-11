@@ -69,7 +69,7 @@ func TestDispatchHelpAndVersion(t *testing.T) {
 		if err := dispatch(cmds, argv, &out, io.Discard); err != nil {
 			t.Fatalf("dispatch(%v) = %v", argv, err)
 		}
-		if !strings.Contains(out.String(), "Usage: expiringsoon <command>") {
+		if !strings.Contains(out.String(), "Usage: rgpstat <command>") {
 			t.Errorf("dispatch(%v) printed no usage", argv)
 		}
 	}
@@ -93,7 +93,7 @@ func TestDispatchCommandHelpGoesToStdout(t *testing.T) {
 		t.Errorf("help wrote to stderr: %q", errBuf.String())
 	}
 	got := out.String()
-	for _, want := range []string{"Usage: expiringsoon scan", "Network", "-rate", "priority order"} {
+	for _, want := range []string{"Usage: rgpstat scan", "Network", "-rate", "priority order"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("scan help is missing %q", want)
 		}
@@ -103,7 +103,7 @@ func TestDispatchCommandHelpGoesToStdout(t *testing.T) {
 	if err := dispatch(commands(), []string{"scan", "-h"}, &out, &errBuf); err != nil {
 		t.Fatalf("scan -h = %v, want nil", err)
 	}
-	if !strings.Contains(out.String(), "Usage: expiringsoon scan") {
+	if !strings.Contains(out.String(), "Usage: rgpstat scan") {
 		t.Error("scan -h printed no usage")
 	}
 }
@@ -114,7 +114,7 @@ func TestDispatchBadFlagIsUsageError(t *testing.T) {
 	if err != errUsage {
 		t.Fatalf("err = %v, want errUsage", err)
 	}
-	if !strings.Contains(errBuf.String(), "Usage: expiringsoon scan") {
+	if !strings.Contains(errBuf.String(), "Usage: rgpstat scan") {
 		t.Error("a bad flag should print the command's usage to stderr")
 	}
 }

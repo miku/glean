@@ -83,11 +83,11 @@ func defaultStorePath() string {
 	if dir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "expiringsoon.jsonl.gz"
+			return "rgpstat.jsonl.gz"
 		}
 		dir = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(dir, "expiringsoon", "domains.jsonl.gz")
+	return filepath.Join(dir, "rgpstat", "domains.jsonl.gz")
 }
 
 // openStore reads the store at path, or starts an empty one if it does not
@@ -202,7 +202,7 @@ func (s *Store) Flush() error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".expiringsoon-*.tmp")
+	tmp, err := os.CreateTemp(dir, ".rgpstat-*.tmp")
 	if err != nil {
 		return err
 	}
