@@ -47,9 +47,9 @@ schedule says is due, which settles at a few thousand lookups a day -- see
 
 ```
 $ rgpstat scan
-74947 words x 4 TLDs, 3 req/s per endpoint, store ~/.local/state/rgpstat/domains.jsonl.gz
-299788 domains to check, 0 up to date, 0 in store
-1761/299788  8.9/s  taken=1363 avail=334 unknown=0 fail=0 throttle=0  eta=9h18m
+2 sources, 92523 labels, 3 req/s per endpoint, store ~/.local/state/rgpstat/domains.jsonl.gz
+370092 domains to check, 0 up to date, 0 in store
+1761/370092  8.9/s  taken=1363 avail=334 unknown=0 fail=0 throttle=0  eta=11h29m
 ```
 
 It is resumable. The store is written every minute and on exit, so `^C` costs
@@ -205,10 +205,19 @@ Standard library only, no dependencies.
 
 ## Word lists
 
-Out of the box the candidate list is `/usr/share/dict/words`, filtered to
-entries that are already lowercase ASCII of the right length. That drops proper
-nouns, which web2 is full of and which make poor generic domains, along with
-the accented and hyphenated entries, which are not registrable as written.
+Out of the box the candidate list is web2 -- Webster's Second International,
+whose 1934 copyright has elapsed -- filtered to entries that are already
+lowercase ASCII of the right length. That drops proper nouns, which web2 is
+full of and which make poor generic domains, along with the accented and
+hyphenated entries, which are not registrable as written.
+
+web2 is compiled into the binary rather than read from
+`/usr/share/dict/words`, because that path is not the same file everywhere: it
+is web2 on the BSDs and macOS, but usually the much smaller `american-english`
+on Debian. The same command would otherwise produce 74,947 candidates on one
+machine and 34,912 on another, and a store built on the first would look
+three-quarters orphaned to the second. Pass `-dict /usr/share/dict/words`, or
+write `include:` instead of `builtin:`, if you would rather have this host's.
 
 ```
 $ rgpstat words -c              # 74947
@@ -221,7 +230,7 @@ extensible through a directory of small files:
 
 ```
 ~/.config/rgpstat/sources.d/
-  10-web2.txt              the system dictionary, as above
+  10-web2.txt              web2, compiled in
   20-letters3.txt          every three-letter string
   30-alnum3.txt            three characters, letters and digits
   40-pronounceable5.txt    five letters, consonant-vowel alternating
@@ -281,6 +290,7 @@ business:
 | `tlds`      | TLDs to pair this list with; defaults to `scan -tlds`              |
 | `priority`  | lower is scanned first; defaults to the `NN-` filename prefix      |
 | `generate`  | enumerate rather than read a file                                  |
+| `builtin`   | read a list compiled into the binary (`web2`)                      |
 | `include`   | read labels from a file elsewhere                                  |
 | `min`, `max`| label length bounds                                                |
 | `fold`      | lowercase entries and keep them (default), or drop capitalised ones |
@@ -294,7 +304,7 @@ will cost, which is what `sources` is for:
 ```
 $ rgpstat sources -all
 SOURCE                PRI  SPEC                   LABELS  TLDS             DOMAINS  NEW      DUE   FIRST PASS
-web2                  10   /usr/share/dict/words  74947   com,net,org,xyz  299788   0        1674  -
+web2                  10   builtin:web2           74947   com,net,org,xyz  299788   0        1674  -
 letters3              20   letters 3              17576   com,net,org,xyz  70304    70304    0     3.3h
 alnum3 (off)          30   alnum 3                46656   com,net,org,xyz  116320   116320   0     5.4h
 pronounceable5 (off)  40   pattern CVCVC          231525  com              229618   229618   0     21.3h

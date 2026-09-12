@@ -875,14 +875,21 @@ var starterSources = []struct {
 	name string
 	body string
 }{
-	{"10-web2.txt", `# The system dictionary: web2, Webster's Second International, whose 1934
-# copyright has elapsed. This file reproduces what rgpstat did before
-# sources.d existed.
+	{"10-web2.txt", `# web2, Webster's Second International, whose 1934 copyright has elapsed:
+# 74,947 candidates at four to eight letters.
+#
+# This reads the copy compiled into the binary, not /usr/share/dict/words,
+# which is not the same file everywhere -- web2 on the BSDs and macOS, but
+# usually the much smaller american-english on Debian. Reading the system
+# one would mean the same command produced a different candidate list on
+# different machines, and a store built on one looking mostly orphaned to
+# the other. Swap in "include: /usr/share/dict/words" if you would rather
+# have whatever this host ships.
 #
 # Turning folding off drops capitalized entries rather than lowercasing
 # them, which is what you want for a dictionary full of proper nouns. A
 # curated list wants the default instead.
-# include: /usr/share/dict/words
+# builtin: web2
 # fold: false
 # min: 4
 # max: 8

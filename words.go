@@ -8,9 +8,13 @@ import (
 	"strings"
 )
 
-// defaultDict is web2, Webster's Second International, shipped with the BSDs
-// and macOS: 234,936 words whose 1934 copyright has elapsed. "The wordlist
-// makes a dandy 'grep' victim." -- share/dict/README, 1993.
+// defaultDict is the system dictionary, used by -dict and by the no-sources.d
+// fallback. Note that it is not the same file everywhere: on the BSDs and
+// macOS it is web2, on Debian it is whichever "wordlist" alternative is
+// installed. For a list that does not change between machines, use the
+// compiled-in web2 -- see web2gz in sources.go.
+//
+// "The wordlist makes a dandy 'grep' victim." -- share/dict/README, 1993.
 const defaultDict = "/usr/share/dict/words"
 
 // wordOpts controls which dictionary entries become candidates.

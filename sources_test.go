@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -179,8 +181,13 @@ func TestSourceInclude(t *testing.T) {
 	if got, want := labels(t, srcs[0]), []string{"alpha", "beta"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("labels = %v, want %v", got, want)
 	}
-	if got := srcs[0].Spec(); got != external {
-		t.Errorf("Spec() = %q, want the include target %q", got, external)
+	// Spec names the include target, abbreviated to fit a table column.
+	if got := srcs[0].Spec(); !strings.HasSuffix(got, "surnames.txt") {
+		t.Errorf("Spec() = %q, want it to name the include target %q", got, external)
+	}
+	// The source still reads the real path, not the abbreviated one.
+	if srcs[0].file != external {
+		t.Errorf("file = %q, want %q", srcs[0].file, external)
 	}
 }
 
@@ -462,5 +469,98 @@ func TestStarterSourcesAllParse(t *testing.T) {
 	// worthwhile addition, and nothing that costs days.
 	if want := []string{"letters3", "web2"}; !reflect.DeepEqual(enabled, want) {
 		t.Errorf("enabled by default = %v, want %v", enabled, want)
+	}
+}
+
+func TestBuiltinWeb2(t *testing.T) {
+	// The count is the point of embedding: it must not depend on what this
+	// machine has in /usr/share/dict/words.
+	dir := writeSources(t, map[string]string{
+		"10-web2.txt": "# builtin: web2\n# fold: false\n# min: 4\n# max: 8\n",
+	})
+	srcs, err := loadSources(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := srcs[0].Count()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 74947 {
+		t.Errorf("builtin web2 yields %d candidates at 4-8 letters, want 74947", n)
+	}
+	if got := srcs[0].Spec(); got != "builtin:web2" {
+		t.Errorf("Spec() = %q, want builtin:web2", got)
+	}
+	// Contains backs -source filtering and prune, so it must agree with Each.
+	if !srcs[0].Contains("zebra") || srcs[0].Contains("zzzzz") {
+		t.Error("Contains disagrees with the list")
+	}
+}
+
+func TestBuiltinIsTheWholeDictionary(t *testing.T) {
+	// Unfiltered, the embedded list is web2 entire. A truncated or
+	// re-generated web2.gz would show up here rather than as a quietly
+	// smaller scan.
+	rc, err := openBuiltin("web2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Close()
+	b, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bytes.Count(b, []byte{'\n'}); got != 235976 {
+		t.Errorf("embedded web2 has %d lines, want 235976", got)
+	}
+}
+
+func TestBuiltinUnknownNameIsAnError(t *testing.T) {
+	if _, err := openBuiltin("websters"); err == nil {
+		t.Error("an unknown builtin should be an error")
+	}
+	// And it is caught when the directory is read, not at scan time.
+	dir := writeSources(t, map[string]string{"10-x.txt": "# builtin: nope\n"})
+	if _, err := loadSources(dir); err == nil || !strings.Contains(err.Error(), "no built-in list") {
+		t.Errorf("err = %v, want it to name the bad builtin", err)
+	}
+}
+
+func TestSourceOriginsAreMutuallyExclusive(t *testing.T) {
+	for name, body := range map[string]string{
+		"gen+include":  "# generate: letters 3\n# include: /etc/words\n",
+		"gen+builtin":  "# generate: letters 3\n# builtin: web2\n",
+		"incl+builtin": "# include: /etc/words\n# builtin: web2\n",
+	} {
+		dir := writeSources(t, map[string]string{"10-bad.txt": body})
+		if _, err := loadSources(dir); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Errorf("%s: err = %v, want a mutual-exclusion error", name, err)
+		}
+	}
+}
+
+func TestShortPath(t *testing.T) {
+	// Short paths pass through; long ones keep the identifying tail and stay
+	// recognisable as paths.
+	if got := shortPath("/etc/words"); got != "/etc/words" {
+		t.Errorf("shortPath short = %q", got)
+	}
+	long := "/var/lib/wordlists/generated/2026/09/census-surnames.txt"
+	got := shortPath(long)
+	if len(got) > maxSpecLen {
+		t.Errorf("shortPath(%q) = %q, %d chars, want at most %d", long, got, len(got), maxSpecLen)
+	}
+	if !strings.HasSuffix(got, "census-surnames.txt") {
+		t.Errorf("shortPath = %q, want it to keep the filename", got)
+	}
+	if !strings.HasPrefix(got, "...") {
+		t.Errorf("shortPath = %q, want it marked as truncated", got)
+	}
+	// $HOME contracts.
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if got := shortPath(filepath.Join(home, "w.txt")); got != "~/w.txt" {
+			t.Errorf("shortPath(home) = %q, want ~/w.txt", got)
+		}
 	}
 }

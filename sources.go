@@ -2,7 +2,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
+	_ "embed"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,6 +14,36 @@ import (
 	"strings"
 	"sync"
 )
+
+// web2gz is Webster's Second International, compiled into the binary.
+//
+// It is here because /usr/share/dict/words is not a stable input. On the BSDs
+// and macOS it is web2, 235,976 entries whose 1934 copyright has elapsed. On
+// Debian and its derivatives it is whichever "wordlist" alternative happens to
+// be installed, normally american-english, which is less than half the size --
+// so the same command produced 74,947 candidates on one machine and 34,912 on
+// another, and a store built on one of them looked three-quarters orphaned to
+// the other.
+//
+// A word list that decides what gets scanned is not a system detail to be
+// looked up at runtime; it is part of the program. Gzipped it costs 737KB in a
+// binary that was already 6.9MB, which is a fair price for the same answer
+// everywhere.
+//
+//go:embed web2.gz
+var web2gz []byte
+
+// builtinNames are the lists compiled in, for error messages and completion.
+var builtinNames = []string{"web2"}
+
+// openBuiltin returns a reader over a compiled-in list.
+func openBuiltin(name string) (io.ReadCloser, error) {
+	switch name {
+	case "web2":
+		return gzip.NewReader(bytes.NewReader(web2gz))
+	}
+	return nil, fmt.Errorf("no built-in list %q, have: %s", name, strings.Join(builtinNames, ", "))
+}
 
 // A source is one list of candidate labels, plus the policy for what to do
 // with it: which TLDs to pair it with, and how eagerly to work through it.
@@ -33,17 +67,25 @@ import (
 //	ord
 //	lhr
 //
-// A file may also carry no words at all and name a generator, or point at a
-// list that lives somewhere else and is maintained by something else:
+// A file may also carry no words at all and name a generator, a list compiled
+// into the binary, or a list that lives somewhere else and is maintained by
+// something else:
 //
 //	# 50-letters4.txt
 //	# generate: letters 4
 //	# tlds: com
 //
+//	# 10-web2.txt
+//	# builtin: web2
+//	# fold: false
+//
 //	# 40-surnames.txt -- refreshed nightly by cron, do not edit the target
 //	# include: /var/lib/wordlists/census-surnames.txt
 //	# fold: false
 //	# min: 4
+//
+// generate:, builtin: and include: are the three origins, and a source has
+// exactly one.
 
 // defaultPriority is where a source with no NN- prefix and no priority
 // directive lands: after the curated lists, before the brute-force ones, on
@@ -63,11 +105,12 @@ type Source struct {
 	TLDs     []string // nil means "use the scan's -tlds"
 	Enabled  bool
 
-	gen  *gen   // set for a generated source
-	file string // set for a list source: Path, or the include: target
-	min  int
-	max  int
-	fold bool // lowercase entries and keep them, rather than dropping capitalised ones
+	gen     *gen   // set for a generated source
+	file    string // set for a list source: Path, or the include: target
+	builtin string // set for a compiled-in list, and then file is unused
+	min     int
+	max     int
+	fold    bool // lowercase entries and keep them, rather than dropping capitalised ones
 
 	once  sync.Once
 	words []string
@@ -195,8 +238,20 @@ func parseSource(path string) (*Source, error) {
 	if err := sc.Err(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	if s.gen != nil && s.file != path {
-		return nil, fmt.Errorf("%s: generate: and include: are mutually exclusive", path)
+	// A source has exactly one origin. Naming two is a mistake worth refusing
+	// rather than resolving by precedence, which would silently ignore one.
+	var origins []string
+	if s.gen != nil {
+		origins = append(origins, "generate:")
+	}
+	if s.file != path {
+		origins = append(origins, "include:")
+	}
+	if s.builtin != "" {
+		origins = append(origins, "builtin:")
+	}
+	if len(origins) > 1 {
+		return nil, fmt.Errorf("%s: %s are mutually exclusive", path, strings.Join(origins, " and "))
 	}
 	return s, nil
 }
@@ -248,6 +303,15 @@ func (s *Source) set_(key, val string) error {
 			p = filepath.Join(filepath.Dir(s.Path), p)
 		}
 		s.file = p
+	case "builtin":
+		// Checked here rather than at load time so a typo is reported when the
+		// directory is read, alongside the file that contains it.
+		rc, err := openBuiltin(val)
+		if err != nil {
+			return err
+		}
+		rc.Close()
+		s.builtin = val
 	case "min":
 		n, err := strconv.Atoi(val)
 		if err != nil {
@@ -297,10 +361,41 @@ func (s *Source) Spec() string {
 	if s.gen != nil {
 		return s.gen.spec
 	}
+	if s.builtin != "" {
+		return "builtin:" + s.builtin
+	}
 	if s.file != s.Path {
-		return s.file
+		return shortPath(s.file)
 	}
 	return "list"
+}
+
+// shortPath keeps an include: target readable in a table. The tail of a path is
+// the part that identifies it, so a long one loses its head rather than its
+// name, and $HOME contracts to ~ as everywhere else.
+const maxSpecLen = 32
+
+func shortPath(p string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" && strings.HasPrefix(p, home+string(os.PathSeparator)) {
+		p = "~" + p[len(home):]
+	}
+	if len(p) <= maxSpecLen {
+		return p
+	}
+	// Cut at a separator where possible, so the result is still a path.
+	tail := p[len(p)-(maxSpecLen-3):]
+	if i := strings.IndexByte(tail, os.PathSeparator); i >= 0 {
+		tail = tail[i:]
+	}
+	return "..." + tail
+}
+
+// open returns the reader for a list source: a compiled-in list, or a file.
+func (s *Source) open() (io.ReadCloser, error) {
+	if s.builtin != "" {
+		return openBuiltin(s.builtin)
+	}
+	return os.Open(s.file)
 }
 
 // load reads and filters a list source. Generated sources never touch it.
@@ -309,7 +404,7 @@ func (s *Source) load() {
 		if s.gen != nil {
 			return
 		}
-		f, err := os.Open(s.file)
+		f, err := s.open()
 		if err != nil {
 			s.err = err
 			return
