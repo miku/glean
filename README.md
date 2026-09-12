@@ -302,19 +302,29 @@ The one question worth answering before enabling a list is what the first pass
 will cost, which is what `sources` is for:
 
 ```
-$ rgpstat sources -all
+$ rgpstat sources
 SOURCE                PRI  SPEC                   LABELS  TLDS             DOMAINS  NEW      DUE   FIRST PASS
 web2                  10   builtin:web2           74947   com,net,org,xyz  299788   0        1674  -
 letters3              20   letters 3              17576   com,net,org,xyz  70304    70304    0     3.3h
 alnum3 (off)          30   alnum 3                46656   com,net,org,xyz  116320   116320   0     5.4h
 pronounceable5 (off)  40   pattern CVCVC          231525  com              229618   229618   0     21.3h
 letters4 (off)        50   letters 4              456976  com              452616   452616   0     41.9h
+enabled                                                          370092   70304    1674  3.3h
 ```
+
+Every file in the directory is listed, the switched-off ones marked `(off)`,
+because the question the table answers is what turning one on would cost. Pass
+`-on` for the enabled ones alone.
 
 `NEW` is the column to read, and it is marginal: labels this source contributes
 that are not already in the store and were not already contributed by an
-earlier source. `alnum3` yields 46,656 labels but only 116,320 new domains
-rather than 186,624, because `letters3` already covered 17,576 of them.
+earlier *enabled* source. A disabled row is priced independently against the
+enabled set rather than against the other disabled ones, since you would turn
+them on one at a time -- so those rows do not sum, and the `enabled` total
+counts only what a scan would actually do.
+
+The marginal part matters: `alnum3` yields 46,656 labels but only 116,320 new
+domains rather than 186,624, because `letters3` already covered 17,576 of them.
 `FIRST PASS` is that divided by the rate the registry will tolerate, counting
 `.com` and `.net` against one budget because they are one machine.
 

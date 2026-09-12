@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -671,7 +672,7 @@ func sourcesCmd() *command {
 		sourcesDir string
 		tlds       string
 		rate       float64
-		all        bool
+		onlyOn     bool
 		doInit     bool
 	)
 	return &command{
@@ -681,6 +682,10 @@ func sourcesCmd() *command {
 		long: `List the word lists in sources.d, in the order the scan budget is spent,
 with what each one will cost.
 
+Every file in the directory is listed, including the ones switched off --
+marked "(off)" -- because the question this table answers is what turning
+one on would cost. Pass -on for the enabled ones alone.
+
 NEW is the column to read: labels this source contributes that are not
 already in the store and not already contributed by an earlier source.
 That, divided by the rate the registry will tolerate, is FIRST PASS --
@@ -688,7 +693,7 @@ the one-off bill for enabling a list. The recurring cost is unrelated and
 much smaller, because a registered name with a distant expiry date is not
 looked at again until shortly before that date.`,
 		groups: []flagGroup{
-			{"Selection", []string{"sources", "tlds", "all"}},
+			{"Selection", []string{"sources", "tlds", "on"}},
 			{"Estimate", []string{"store", "rate"}},
 			{"Action", []string{"init"}},
 		},
@@ -697,7 +702,7 @@ looked at again until shortly before that date.`,
 			fs.StringVar(&store, "store", defaultStorePath(), "`path` to the domain store, for the NEW and DUE columns")
 			fs.StringVar(&tlds, "tlds", "com,net,org,xyz", "TLD `list` assumed for sources that name none")
 			fs.Float64Var(&rate, "rate", 3, "requests per second per registry host, for the estimate")
-			fs.BoolVar(&all, "all", false, "include disabled sources")
+			fs.BoolVar(&onlyOn, "on", false, "only the enabled sources (default: every file, disabled marked \"(off)\")")
 			fs.BoolVar(&doInit, "init", false, "write a starter sources.d and exit")
 		},
 		complete: sourceCompleter(&sourcesDir),
@@ -719,7 +724,8 @@ looked at again until shortly before that date.`,
 			if err != nil {
 				return err
 			}
-			return reportSources(os.Stdout, srcs, st, splitTLDs(tlds), store, rate, all)
+			reg := loadRegistry(bootstrapCachePath(store), 7*24*time.Hour, 30*time.Second)
+			return reportSources(os.Stdout, srcs, st, reg, splitTLDs(tlds), rate, onlyOn)
 		},
 	}
 }
@@ -730,18 +736,18 @@ looked at again until shortly before that date.`,
 // being asked: not "how big is this list" but "what does adding it do". A
 // four-letter enumeration overlaps web2 almost entirely in its dictionary
 // words, and the raw count would overstate it by 75,000.
-func reportSources(out *os.File, srcs []*Source, st *Store, fallback []string, storePath string, rate float64, all bool) error {
+func reportSources(out io.Writer, srcs []*Source, st *Store, reg *registry, fallback []string, rate float64, onlyOn bool) error {
 	var active []*Source
 	for _, s := range srcs {
-		if s.Enabled || all {
+		if s.Enabled || !onlyOn {
 			active = append(active, s)
 		}
 	}
 
-	// Every TLD anyone asks for, and which endpoint host serves it: .com and
-	// .net share a machine and therefore share a rate budget, so an estimate
-	// that treats them as independent is out by a factor of two.
-	reg := loadRegistry(bootstrapCachePath(storePath), 7*24*time.Hour, 30*time.Second)
+	// Which endpoint host serves each TLD: .com and .net share a machine and
+	// therefore share a rate budget, so an estimate that treats them as
+	// independent is out by a factor of two. A nil registry (no cache, no
+	// network) falls back to one budget per TLD.
 	hostOf := func(tld string) string {
 		if reg != nil {
 			if base, ok := reg.base(tld); ok {
@@ -779,24 +785,52 @@ func reportSources(out *os.File, srcs []*Source, st *Store, fallback []string, s
 	// rather than every domain in the run.
 	for _, tld := range tlds {
 		host := hostOf(tld)
+		count := func(i int, w string) {
+			stats[i].domains++
+			rec, ok := st.Get(w + "." + tld)
+			switch {
+			case !ok:
+				stats[i].fresh++
+				stats[i].byHost[host]++
+			case !due(rec, now).After(now):
+				stats[i].due++
+			}
+		}
+
+		// The enabled sources form one chain, deduplicated in the order the
+		// scan would spend its budget: each is priced net of the ones before.
 		seen := make(map[string]bool)
 		for i, s := range active {
-			if !hasTLD(s.tldsOr(fallback), tld) {
+			if !s.Enabled || !hasTLD(s.tldsOr(fallback), tld) {
 				continue
 			}
 			if err := s.Each(func(w string) bool {
-				if seen[w] {
-					return true
+				if !seen[w] {
+					seen[w] = true
+					count(i, w)
 				}
-				seen[w] = true
-				stats[i].domains++
-				rec, ok := st.Get(w + "." + tld)
-				switch {
-				case !ok:
-					stats[i].fresh++
-					stats[i].byHost[host]++
-				case !due(rec, now).After(now):
-					stats[i].due++
+				return true
+			}); err != nil {
+				return err
+			}
+		}
+
+		// A disabled source is priced independently against that baseline,
+		// never folded into it. It contributes nothing to a real scan, so it
+		// must not absorb labels from an enabled source listed after it -- and
+		// the question being asked of it is "what would turning this one on
+		// cost", which is its own overlap with what is already enabled, not
+		// with the other things that are also switched off.
+		//
+		// Each yields distinct labels already, so there is nothing to add to
+		// seen for a source's own deduplication.
+		for i, s := range active {
+			if s.Enabled || !hasTLD(s.tldsOr(fallback), tld) {
+				continue
+			}
+			if err := s.Each(func(w string) bool {
+				if !seen[w] {
+					count(i, w)
 				}
 				return true
 			}); err != nil {
@@ -818,19 +852,25 @@ func reportSources(out *os.File, srcs []*Source, st *Store, fallback []string, s
 		if !s.Enabled {
 			name += " (off)"
 		}
-		for h, c := range stats[i].byHost {
-			totalFresh[h] += c
+		// The total is what a scan would actually do, so only the enabled
+		// sources are in it. Adding the switched-off rows would describe a run
+		// nobody asked for, and each of those rows is priced against the same
+		// baseline anyway, so they do not sum.
+		if s.Enabled {
+			for h, c := range stats[i].byHost {
+				totalFresh[h] += c
+			}
+			totalDomains += stats[i].domains
+			totalNew += stats[i].fresh
+			totalDue += stats[i].due
 		}
-		totalDomains += stats[i].domains
-		totalNew += stats[i].fresh
-		totalDue += stats[i].due
 		fmt.Fprintf(w, "%s\t%d\t%s\t%d\t%s\t%d\t%d\t%d\t%s\n",
 			name, s.Priority, s.Spec(), n,
 			strings.Join(s.tldsOr(fallback), ","),
 			stats[i].domains, stats[i].fresh, stats[i].due,
 			estimate(stats[i].byHost, rate))
 	}
-	fmt.Fprintf(w, "\t\t\t\t\t%d\t%d\t%d\t%s\n", totalDomains, totalNew, totalDue, estimate(totalFresh, rate))
+	fmt.Fprintf(w, "enabled\t\t\t\t\t%d\t%d\t%d\t%s\n", totalDomains, totalNew, totalDue, estimate(totalFresh, rate))
 	return w.Flush()
 }
 
@@ -938,20 +978,23 @@ func initSourcesQuiet(dir string) (err error) {
 	return err
 }
 
-func writeStarter(dir string) (wrote, skipped int, err error) {
+// writeStarter returns the names written and the names left alone. Reporting
+// the second list matters: -init after an upgrade looks like it did nothing,
+// and a file that was written by an older version keeps whatever it said then.
+func writeStarter(dir string) (wrote, skipped []string, err error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return 0, 0, err
+		return nil, nil, err
 	}
 	for _, f := range starterSources {
 		path := filepath.Join(dir, f.name)
 		if _, err := os.Stat(path); err == nil {
-			skipped++
+			skipped = append(skipped, f.name)
 			continue
 		}
 		if err := os.WriteFile(path, []byte(f.body), 0o644); err != nil {
 			return wrote, skipped, err
 		}
-		wrote++
+		wrote = append(wrote, f.name)
 	}
 	return wrote, skipped, nil
 }
@@ -961,9 +1004,20 @@ func initSources(dir string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s: %d written, %d already there\n", dir, wrote, skipped)
-	fmt.Println("enabled by default: web2 (as before) and every three-letter string")
-	fmt.Println("run \"rgpstat sources\" to see what the rest would cost")
+	fmt.Println(dir)
+	for _, name := range wrote {
+		fmt.Printf("  wrote  %s\n", name)
+	}
+	for _, name := range skipped {
+		fmt.Printf("  kept   %s (already there, left alone)\n", name)
+	}
+	if len(skipped) > 0 {
+		fmt.Println("\nNothing existing was overwritten, so a file written by an earlier version\nstill says what it said then. Delete one and rerun to refresh it.")
+	}
+	if len(wrote) > 0 {
+		fmt.Println("\nenabled: web2 and every three-letter string")
+		fmt.Println("run \"rgpstat sources\" to see what the rest would cost")
+	}
 	return nil
 }
 

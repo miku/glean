@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -563,4 +564,63 @@ func TestShortPath(t *testing.T) {
 			t.Errorf("shortPath(home) = %q, want ~/w.txt", got)
 		}
 	}
+}
+
+// TestReportSourcesPricesDisabledIndependently is the property that makes it
+// safe to list switched-off sources by default: a disabled source must not
+// absorb labels from an enabled one, even when it sorts first.
+func TestReportSourcesPricesDisabledIndependently(t *testing.T) {
+	dir := writeSources(t, map[string]string{
+		// Disabled, and at the *lowest* priority, so it is walked first.
+		"10-off.txt": "# enabled: false\n# tlds: com\nalpha\nbeta\ngamma\n",
+		// Enabled, overlapping it on two of three labels.
+		"20-on.txt": "# tlds: com\nbeta\ngamma\ndelta\n",
+	})
+	srcs, err := loadSources(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := openStore(filepath.Join(t.TempDir(), "d.jsonl.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := reportSources(&buf, srcs, st, nil, []string{"com"}, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+
+	// The enabled source owns all three of its labels: the disabled one that
+	// precedes it must not have claimed beta and gamma.
+	if !regexpLine(out, `^on\s`, "3") {
+		t.Errorf("enabled source did not get all 3 of its labels:\n%s", out)
+	}
+	// The disabled source is priced against the enabled baseline, so only
+	// alpha is new to it -- beta and gamma are already covered.
+	if !regexpLine(out, `^off \(off\)\s`, "1") {
+		t.Errorf("disabled source was not priced against the enabled baseline:\n%s", out)
+	}
+	// And the total counts the enabled set only.
+	if !strings.Contains(out, "enabled") {
+		t.Errorf("no enabled total row:\n%s", out)
+	}
+}
+
+// regexpLine reports whether the line matching pat has want in its DOMAINS
+// column (the sixth whitespace-separated field).
+func regexpLine(out, pat, want string) bool {
+	re := regexp.MustCompile(pat)
+	for _, line := range strings.Split(out, "\n") {
+		if !re.MatchString(line) {
+			continue
+		}
+		f := strings.Fields(line)
+		// SOURCE [(off)] PRI SPEC LABELS TLDS DOMAINS ...
+		for i, x := range f {
+			if x == "list" && i+3 < len(f) {
+				return f[i+3] == want
+			}
+		}
+	}
+	return false
 }
