@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // Verdicts. A domain is taken, free, or the registry told us something we did
@@ -65,8 +68,8 @@ func (r Record) Has(code string) bool {
 }
 
 // Store is the whole dataset held in memory and written out as one JSON Lines
-// file. At the scale this tool works at (~300k records, ~40MB raw, ~10MB
-// gzipped) a full rewrite costs well under a second, which buys atomicity and
+// file. At the scale this tool works at (~300k records, ~50MB raw, ~8MB
+// zstd) a full rewrite costs well under a second, which buys atomicity and
 // a stable, diffable, sorted file for the price of never appending.
 type Store struct {
 	path string
@@ -83,31 +86,92 @@ func defaultStorePath() string {
 	if dir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "rgpstat.jsonl.gz"
+			return "rgpstat.jsonl.zst"
 		}
 		dir = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(dir, "rgpstat", "domains.jsonl.gz")
+	return filepath.Join(dir, "rgpstat", "domains.jsonl.zst")
+}
+
+// Compression is picked by suffix when writing, and by magic bytes when
+// reading, so a store renamed or recompressed by hand still opens. zstd is the
+// default because nearly every command starts by loading the whole store, and
+// zstd decompresses it about five times faster than gzip at a smaller size.
+const (
+	compressNone = iota
+	compressGzip
+	compressZstd
+)
+
+func compressionFor(path string) int {
+	switch {
+	case strings.HasSuffix(path, ".zst"), strings.HasSuffix(path, ".zstd"):
+		return compressZstd
+	case strings.HasSuffix(path, ".gz"):
+		return compressGzip
+	}
+	return compressNone
+}
+
+var (
+	gzipMagic = []byte{0x1f, 0x8b}
+	zstdMagic = []byte{0x28, 0xb5, 0x2f, 0xfd}
+)
+
+// legacyGzipPath is where a zstd store used to live before the switch from
+// gzip, or "" if path is not a zstd path.
+func legacyGzipPath(path string) string {
+	for _, ext := range []string{".zst", ".zstd"} {
+		if strings.HasSuffix(path, ext) {
+			return strings.TrimSuffix(path, ext) + ".gz"
+		}
+	}
+	return ""
 }
 
 // openStore reads the store at path, or starts an empty one if it does not
-// exist yet. A path ending in .gz is compressed.
+// exist yet. A missing .zst store falls back to a .gz one next to it; the
+// store is then marked dirty, so the next flush migrates it to zstd.
 func openStore(path string) (*Store, error) {
 	s := &Store{path: path, recs: make(map[string]Record)}
-	f, err := os.Open(path)
+	src := path
+	f, err := os.Open(src)
 	if os.IsNotExist(err) {
-		return s, nil
+		if src = legacyGzipPath(path); src == "" {
+			return s, nil
+		}
+		f, err = os.Open(src)
+		if os.IsNotExist(err) {
+			return s, nil
+		}
+		s.dirty = true
 	}
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+	if err := s.load(f); err != nil {
+		return nil, fmt.Errorf("%s: %w", src, err)
+	}
+	return s, nil
+}
 
-	var r io.Reader = f
-	if strings.HasSuffix(path, ".gz") {
-		zr, err := gzip.NewReader(f)
+func (s *Store) load(f io.Reader) error {
+	br := bufio.NewReaderSize(f, 256*1024)
+	magic, _ := br.Peek(4)
+	var r io.Reader = br
+	switch {
+	case bytes.HasPrefix(magic, zstdMagic):
+		zr, err := zstd.NewReader(br)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+			return err
+		}
+		defer zr.Close()
+		r = zr
+	case bytes.HasPrefix(magic, gzipMagic):
+		zr, err := gzip.NewReader(br)
+		if err != nil {
+			return err
 		}
 		defer zr.Close()
 		r = zr
@@ -121,14 +185,11 @@ func openStore(path string) (*Store, error) {
 		}
 		var rec Record
 		if err := json.Unmarshal(line, &rec); err != nil {
-			return nil, fmt.Errorf("%s:%d: %w", path, n, err)
+			return fmt.Errorf("line %d: %w", n, err)
 		}
 		s.recs[rec.Domain] = rec
 	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return s, nil
+	return sc.Err()
 }
 
 func (s *Store) Get(domain string) (Record, bool) {
@@ -208,7 +269,7 @@ func (s *Store) Flush() error {
 	}
 	defer os.Remove(tmp.Name())
 
-	if err := writeRecords(tmp, recs, strings.HasSuffix(s.path, ".gz")); err != nil {
+	if err := writeRecords(tmp, recs, compressionFor(s.path)); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -225,12 +286,25 @@ func (s *Store) Flush() error {
 	return os.Rename(tmp.Name(), s.path)
 }
 
-func writeRecords(w io.Writer, recs []Record, compress bool) error {
+// writeRecords writes zstd at SpeedBetterCompression: decoding speed barely
+// depends on the level, but a smaller file decodes a little faster, and the
+// extra encoding time (~150ms for the full store) is paid once per checkpoint
+// rather than on every read.
+func writeRecords(w io.Writer, recs []Record, compression int) error {
 	bw := bufio.NewWriterSize(w, 256*1024)
 	var out io.Writer = bw
-	var zw *gzip.Writer
-	if compress {
+	var zw io.WriteCloser
+	switch compression {
+	case compressGzip:
 		zw = gzip.NewWriter(bw)
+	case compressZstd:
+		var err error
+		zw, err = zstd.NewWriter(bw, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+		if err != nil {
+			return err
+		}
+	}
+	if zw != nil {
 		out = zw
 	}
 	enc := json.NewEncoder(out)

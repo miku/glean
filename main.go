@@ -141,7 +141,7 @@ before it starts grinding through four-letter enumeration.`,
 			dictGroup,
 		},
 		register: func(fs *flag.FlagSet) {
-			fs.StringVar(&store, "store", defaultStorePath(), "`path` to the domain store (.gz for compressed)")
+			fs.StringVar(&store, "store", defaultStorePath(), "`path` to the domain store (.zst or .gz for compressed)")
 			fs.StringVar(&sourcesDir, "sources", defaultSourcesDir(), "`directory` of word lists")
 			fs.Var(&names, "source", "only scan this `name`, repeatable (default: all enabled)")
 			fs.StringVar(&wordFile, "w", "", "wordlist `file`, bypassing sources.d entirely")

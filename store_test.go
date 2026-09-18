@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"os"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestStoreRoundTrip(t *testing.T) {
-	for _, name := range []string{"domains.jsonl", "domains.jsonl.gz"} {
+	for _, name := range []string{"domains.jsonl", "domains.jsonl.gz", "domains.jsonl.zst"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), name)
 			st, err := openStore(path)
@@ -47,6 +48,89 @@ func TestStoreRoundTrip(t *testing.T) {
 				t.Errorf("got %+v, want %+v", got, want)
 			}
 		})
+	}
+}
+
+func TestStoreCompressionOnDisk(t *testing.T) {
+	for name, magic := range map[string][]byte{
+		"d.jsonl.gz":   gzipMagic,
+		"d.jsonl.zst":  zstdMagic,
+		"d.jsonl.zstd": zstdMagic,
+		"d.jsonl":      []byte(`{"domain"`),
+	} {
+		path := filepath.Join(t.TempDir(), name)
+		st, _ := openStore(path)
+		st.Put(Record{Domain: "a.com", Status: statusAvail})
+		if err := st.Flush(); err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.HasPrefix(b, magic) {
+			t.Errorf("%s starts with % x, want % x", name, b[:4], magic)
+		}
+	}
+}
+
+func TestStoreSniffsCompression(t *testing.T) {
+	// Reading goes by content, not name: a gzipped store renamed to .zst (or
+	// to no suffix at all) still opens.
+	dir := t.TempDir()
+	gz := filepath.Join(dir, "d.jsonl.gz")
+	st, _ := openStore(gz)
+	st.Put(Record{Domain: "a.com", Status: statusAvail})
+	if err := st.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"d.jsonl.zst", "d.jsonl"} {
+		other := filepath.Join(dir, name)
+		if err := os.Rename(gz, other); err != nil {
+			t.Fatal(err)
+		}
+		re, err := openStore(other)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if _, ok := re.Get("a.com"); !ok {
+			t.Errorf("%s: record missing", name)
+		}
+		gz = other
+	}
+}
+
+func TestStoreMigratesFromGzip(t *testing.T) {
+	dir := t.TempDir()
+	old := filepath.Join(dir, "domains.jsonl.gz")
+	st, _ := openStore(old)
+	st.Put(Record{Domain: "a.com", Status: statusAvail})
+	if err := st.Flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(dir, "domains.jsonl.zst")
+	st, err := openStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.Get("a.com"); !ok {
+		t.Fatal("a missing .zst store should fall back to the .gz next to it")
+	}
+	// Nothing changed, but the flush must still happen: it is the migration.
+	if err := st.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("flush did not write the zstd store: %v", err)
+	}
+	if !bytes.HasPrefix(b, zstdMagic) {
+		t.Error("migrated store is not zstd")
+	}
+	re, _ := openStore(path)
+	if _, ok := re.Get("a.com"); !ok {
+		t.Error("record lost in migration")
 	}
 }
 

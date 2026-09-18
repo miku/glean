@@ -47,7 +47,7 @@ schedule says is due, which settles at a few thousand lookups a day -- see
 
 ```
 $ rgpstat scan
-2 sources, 92523 labels, 3 req/s per endpoint, store ~/.local/state/rgpstat/domains.jsonl.gz
+2 sources, 92523 labels, 3 req/s per endpoint, store ~/.local/state/rgpstat/domains.jsonl.zst
 370092 domains to check, 0 up to date, 0 in store
 1761/370092  8.9/s  taken=1363 avail=334 unknown=0 fail=0 throttle=0  eta=11h29m
 ```
@@ -156,13 +156,13 @@ exactly that.
 
 ## Data storage
 
-One gzipped JSON Lines file, sorted by domain, rewritten in full and renamed
+One zstd-compressed JSON Lines file, sorted by domain, rewritten in full and renamed
 into place on every checkpoint. It lives in the XDG *state* directory rather
 than the cache directory -- a wiped cache is an inconvenience, a wiped scan is
 five hours.
 
 ```
-$ zcat ~/.local/state/rgpstat/domains.jsonl.gz | head -1
+$ zstdcat ~/.local/state/rgpstat/domains.jsonl.zst | head -1
 {"domain":"aalii.com","status":"taken","epp":["clientTransferProhibited"],
  "expiry":"2027-06-23","changed":"2026-05-27",
  "registrar":"TurnCommerce, Inc. DBA NameBright.com","checked":"2026-09-07T12:23:14Z"}
@@ -171,6 +171,14 @@ $ zcat ~/.local/state/rgpstat/domains.jsonl.gz | head -1
 At a few hundred thousand records this is tens of megabytes and a full rewrite
 costs well under a second, which buys atomicity and a file that diffs cleanly
 between runs. A database can wait until the data says it is needed.
+
+zstd rather than gzip because nearly every command begins by loading the whole
+store, and zstd decompresses it about five times faster (~20ms vs ~100ms for
+300k records) at a slightly smaller size. `--store` also takes a `.gz` or an
+uncompressed path; reading goes by the file's magic bytes, writing by its
+suffix. A store from before the switch, `domains.jsonl.gz`, is still read when
+no `.zst` exists, and the next scan writes it out as `domains.jsonl.zst` (the
+old file is left alone).
 
 The word lists are configuration, not data, and live in the XDG *config*
 directory instead -- `~/.config/rgpstat/sources.d/`. They are inputs you
