@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -276,5 +277,120 @@ func TestRecordHas(t *testing.T) {
 	}
 	if (Record{}).Has("pendingDelete") {
 		t.Error("Has on an empty record should be false")
+	}
+}
+
+func TestStoreKeepsDomainOrder(t *testing.T) {
+	// New domains are appended unsorted and merged in on demand; every
+	// reader must still see domain order.
+	path := filepath.Join(t.TempDir(), "d.jsonl")
+	st, _ := openStore(path)
+	for _, d := range []string{"m.com", "c.com", "x.com"} {
+		st.Put(Record{Domain: d, Status: statusAvail})
+	}
+	if err := st.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = openStore(path)
+	for _, d := range []string{"z.com", "a.com", "d.com"} {
+		st.Put(Record{Domain: d, Status: statusAvail})
+	}
+	st.Put(Record{Domain: "c.com", Status: statusTaken})
+	if n := st.Delete("x.com", "nope.com"); n != 1 {
+		t.Errorf("Delete = %d, want 1", n)
+	}
+	st.Put(Record{Domain: "b.com", Status: statusAvail})
+
+	var got []string
+	for r := range st.All() {
+		got = append(got, r.Domain)
+	}
+	want := []string{"a.com", "b.com", "c.com", "d.com", "m.com", "z.com"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+	for _, d := range want {
+		if r, ok := st.Get(d); !ok || r.Domain != d {
+			t.Errorf("Get(%s) = %v, %v", d, r.Domain, ok)
+		}
+	}
+	if r, _ := st.Get("c.com"); r.Status != statusTaken {
+		t.Error("Put did not replace an existing record")
+	}
+}
+
+func TestStoreReadsUnsortedFile(t *testing.T) {
+	// A hand-edited store may be out of order or repeat a domain; the later
+	// line wins, as it would reading top to bottom.
+	path := filepath.Join(t.TempDir(), "d.jsonl")
+	lines := `{"domain":"b.com","status":"taken"}
+{"domain":"a.com","status":"taken"}
+
+{"domain":"b.com","status":"avail"}
+`
+	if err := os.WriteFile(path, []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := openStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Len() != 2 {
+		t.Fatalf("len = %d, want 2", st.Len())
+	}
+	if r, _ := st.Get("b.com"); r.Status != statusAvail {
+		t.Errorf("b.com = %q, want the later line", r.Status)
+	}
+	var got []string
+	for r := range st.All() {
+		got = append(got, r.Domain)
+	}
+	if !reflect.DeepEqual(got, []string{"a.com", "b.com"}) {
+		t.Errorf("order = %v", got)
+	}
+}
+
+func TestStoreLoadsAcrossBlocks(t *testing.T) {
+	// Enough records to span several of readRecords' blocks, which are
+	// decoded in parallel and must come back whole and in order.
+	path := filepath.Join(t.TempDir(), "d.jsonl.zst")
+	st, _ := openStore(path)
+	const n = 30000
+	for i := range n {
+		st.Put(Record{Domain: fmt.Sprintf("%06d.com", i), Status: statusTaken,
+			Registrar: strings.Repeat("r", 60), Checked: time.Unix(int64(i), 0).UTC()})
+	}
+	if err := st.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	re, err := openStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if re.Len() != n {
+		t.Fatalf("len = %d, want %d", re.Len(), n)
+	}
+	i := 0
+	for r := range re.All() {
+		if want := fmt.Sprintf("%06d.com", i); r.Domain != want {
+			t.Fatalf("record %d = %s, want %s", i, r.Domain, want)
+		}
+		i++
+	}
+}
+
+func TestStoreReportsBadLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "d.jsonl")
+	var b strings.Builder
+	for i := range 20000 {
+		fmt.Fprintf(&b, `{"domain":"%06d.com","status":"taken","registrar":"%s"}`+"\n", i, strings.Repeat("r", 60))
+	}
+	b.WriteString("{not json\n")
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := openStore(path)
+	if err == nil || !strings.Contains(err.Error(), "line 20001:") {
+		t.Errorf("err = %v, want it to name line 20001", err)
 	}
 }

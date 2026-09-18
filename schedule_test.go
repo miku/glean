@@ -200,3 +200,26 @@ func TestDueFailureBackoff(t *testing.T) {
 		t.Errorf("backoff never reached the cap, got %s", last)
 	}
 }
+
+func TestParseDate(t *testing.T) {
+	for in, want := range map[string]string{
+		"2026-09-18":               "2026-09-18",
+		"2026-09-18T12:00:00.781Z": "2026-09-18",
+		"2024-02-29":               "2024-02-29",
+		"2026-02-29":               "",
+		"2026-13-01":               "",
+		"2026-00-10":               "",
+		"2026-9-18":                "",
+		"20x6-09-18":               "",
+		"":                         "",
+	} {
+		d, ok := parseDate(in)
+		got := ""
+		if ok {
+			got = d.Format(time.DateOnly)
+		}
+		if got != want {
+			t.Errorf("parseDate(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

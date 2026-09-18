@@ -185,13 +185,33 @@ func due(r Record, now time.Time) time.Time {
 	return wake
 }
 
+// parseDate reads the YYYY-MM-DD prefix of s. It is written out by hand
+// because stage and due call it for every record in the store, and
+// time.Parse costs more than the rest of their work combined.
 func parseDate(s string) (time.Time, bool) {
-	if s == "" {
+	if len(s) < 10 || s[4] != '-' || s[7] != '-' {
 		return time.Time{}, false
 	}
-	t, err := time.Parse("2006-01-02", s[:min(len(s), 10)])
-	if err != nil {
+	y, m, d := atoiDigits(s[0:4]), atoiDigits(s[5:7]), atoiDigits(s[8:10])
+	if y < 0 || m < 1 || m > 12 || d < 1 {
 		return time.Time{}, false
+	}
+	t := time.Date(y, time.Month(m), d, 0, 0, 0, 0, time.UTC)
+	if t.Day() != d {
+		return time.Time{}, false // February 30th and friends
 	}
 	return t, true
+}
+
+// atoiDigits parses s as a non-negative decimal, or returns -1 if s holds
+// anything but digits.
+func atoiDigits(s string) int {
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return -1
+		}
+		n = n*10 + int(s[i]-'0')
+	}
+	return n
 }

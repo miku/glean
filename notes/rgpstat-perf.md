@@ -105,6 +105,41 @@ greppable `.jsonl.zst`. Tier 1 is also the prerequisite for tier 2.
    DuckDB needs cgo. Parquet is at most worth having as an *export* for
    offline analysis.
 
+## tier 1, as done
+
+For scale: `zstdcat -T0` reads the whole mira store in 0.14s, so everything
+above that is ours.
+
+- The store is a `[]Record` in domain order plus a `map[string]int32` index.
+  The file is sorted, so loading is appending. Filling the index costs ~60ms,
+  against ~200ms for the old `map[string]Record`: Go maps store values over
+  128 bytes out of line, which is one more allocation per record.
+- Put appends new domains unsorted. `sort()` sorts that tail and merges it
+  in: linear, ~0.2s at 1.26M, run by Flush and by All. A file that is not
+  strictly sorted (hand-edited, duplicates) is loaded through Put instead, so
+  the later line wins.
+- `All()` is an `iter.Seq[Record]` over the live slice under the lock, not a
+  sorted copy. Flush writes from the live slice too: the scan loop is both
+  the only writer and the caller of Flush, so holding the lock blocks nothing.
+- `readRecords` cuts the decompressed stream into 1MB blocks at newlines and
+  decodes them on GOMAXPROCS goroutines. Line numbers in errors survive.
+- `parseDate` is written out by hand. `stage` and `due` call it about twice
+  per record, and `time.Parse` was most of their cost.
+
+Measured on a synthetic 1.26M-record store, on the Mac:
+
+| | before | after |
+|---|---|---|
+| openStore | ~1.2 s | ~0.5 s |
+| All() | ~0.45 s (copy + sort) | 0 (iterates in place) |
+| stage/due loop | ~0.25 s | ~0.15 s |
+| `rgpstat stats`, end to end | ~2.2 s | ~1.0 s |
+
+Not done: compact records (item 2). Load is now mostly allocation and page
+faults for 152-byte records with 5-6 strings each, plus one copy when the
+decoded blocks are concatenated. Shrinking `Record` is the next lever, but it
+touches every file that uses one, so it waits until it is needed.
+
 ## recommendation
 
 Tier 1 first. It attacks the real cost (allocation and GC) and changes nothing

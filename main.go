@@ -296,7 +296,7 @@ a word list never leaves stale provenance behind in 300k records.`,
 				hasDrop  bool
 			}
 			var rows []row
-			for _, r := range st.All() {
+			for r := range st.All() {
 				s := stage(r, now)
 				switch s {
 				case stageRegistered, stageUnknown:
@@ -512,8 +512,7 @@ func statsCmd() *command {
 				oldest  time.Time
 				newest  time.Time
 			)
-			recs := st.All()
-			for _, r := range recs {
+			for r := range st.All() {
 				byStage[stage(r, now)]++
 				if i := strings.LastIndexByte(r.Domain, '.'); i >= 0 {
 					byTLD[r.Domain[i+1:]]++
@@ -534,9 +533,9 @@ func statsCmd() *command {
 			if fi, err := os.Stat(store); err == nil {
 				fmt.Fprintf(w, "size\t%s\n", humanBytes(fi.Size()))
 			}
-			fmt.Fprintf(w, "records\t%d\n", len(recs))
+			fmt.Fprintf(w, "records\t%d\n", st.Len())
 			fmt.Fprintf(w, "due now\t%d\n", dueNow)
-			if orphans, err := countOrphans(recs, sourcesDir, splitTLDs(tlds)); err == nil && orphans > 0 {
+			if orphans, err := countOrphans(st, sourcesDir, splitTLDs(tlds)); err == nil && orphans > 0 {
 				fmt.Fprintf(w, "orphaned\t%d\t(no longer in any source; see \"rgpstat prune\")\n", orphans)
 			}
 			if !oldest.IsZero() {
@@ -567,7 +566,7 @@ func statsCmd() *command {
 // countOrphans reports how many stored records no source would produce any
 // more. It is not an error for there to be no sources.d at all -- then nothing
 // is orphaned, because the fallback dictionary is the only source there is.
-func countOrphans(recs []Record, dir string, fallback []string) (int, error) {
+func countOrphans(st *Store, dir string, fallback []string) (int, error) {
 	srcs, err := loadSources(dir)
 	if err != nil || len(srcs) == 0 {
 		return 0, err
@@ -579,7 +578,7 @@ func countOrphans(recs []Record, dir string, fallback []string) (int, error) {
 		}
 	}
 	n := 0
-	for _, r := range recs {
+	for r := range st.All() {
 		if !anyCovers(enabled, r.Domain, fallback) {
 			n++
 		}
@@ -639,7 +638,7 @@ is housekeeping, not maintenance, and it is a dry run unless you pass -f.`,
 			}
 			fallback := splitTLDs(tlds)
 			var orphans []string
-			for _, r := range st.All() {
+			for r := range st.All() {
 				if !anyCovers(enabled, r.Domain, fallback) {
 					orphans = append(orphans, r.Domain)
 				}
