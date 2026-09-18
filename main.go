@@ -969,6 +969,19 @@ var starterSources = []struct {
 # tlds: com
 # priority: 50
 `},
+	{"60-compound.txt", `# Two-word names, "word" + "cloud", "link" + "tree": every ordered pair of
+# about 1250 common English words, 1,504,148 labels at up to twelve
+# letters. Around six days against .com alone.
+#
+# The pairs come out most common words first, so a nightly "scan -n" that
+# only gets partway through has spent its budget on the best of them.
+# "compound a.txt b.txt" pairs two lists of your own instead, left and right.
+# enabled: false
+# generate: compound common
+# max: 12
+# tlds: com
+# priority: 60
+`},
 }
 
 // initSourcesQuiet writes the starter files, never overwriting one that is

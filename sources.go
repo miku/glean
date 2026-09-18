@@ -34,13 +34,24 @@ import (
 var web2gz []byte
 
 // builtinNames are the lists compiled in, for error messages and completion.
-var builtinNames = []string{"web2"}
+var builtinNames = []string{"web2", "common"}
+
+func isBuiltin(name string) bool {
+	for _, b := range builtinNames {
+		if b == name {
+			return true
+		}
+	}
+	return false
+}
 
 // openBuiltin returns a reader over a compiled-in list.
 func openBuiltin(name string) (io.ReadCloser, error) {
 	switch name {
 	case "web2":
 		return gzip.NewReader(bytes.NewReader(web2gz))
+	case "common":
+		return io.NopCloser(bytes.NewReader(commonTxt)), nil
 	}
 	return nil, fmt.Errorf("no built-in list %q, have: %s", name, strings.Join(builtinNames, ", "))
 }
@@ -253,6 +264,14 @@ func parseSource(path string) (*Source, error) {
 	if len(origins) > 1 {
 		return nil, fmt.Errorf("%s: %s are mutually exclusive", path, strings.Join(origins, " and "))
 	}
+	// min: and max: bound a compound's labels as they bound a list's; the
+	// directives may come in any order, so they are applied once all are read.
+	if s.gen != nil && s.gen.comp != nil {
+		s.gen.comp.min = s.min
+		if s.max > 0 {
+			s.gen.comp.max = s.max
+		}
+	}
 	return s, nil
 }
 
@@ -292,7 +311,16 @@ func (s *Source) set_(key, val string) error {
 		}
 		s.Priority = n
 	case "generate":
-		g, err := parseGen(val)
+		var g *gen
+		var err error
+		if kind, arg, _ := strings.Cut(val, " "); strings.EqualFold(kind, "compound") {
+			var c *compound
+			if c, err = parseCompound(arg, filepath.Dir(s.Path)); err == nil {
+				g = &gen{comp: c, spec: val}
+			}
+		} else {
+			g, err = parseGen(val)
+		}
 		if err != nil {
 			return fmt.Errorf("generate: %w", err)
 		}
@@ -591,8 +619,12 @@ const maxGenerated = 20_000_000
 // covers all three spellings -- "letters 4" is four letter-alphabets, "alnum 3"
 // is three alphanumeric ones, "pattern CVCVC" is the five named classes -- so
 // there is one odometer rather than three generators.
+//
+// The exception is compound, which pairs words rather than characters, and
+// which the methods below hand off to when it is set.
 type gen struct {
 	alpha []string
+	comp  *compound
 	spec  string
 }
 
@@ -651,6 +683,9 @@ func parseGen(spec string) (*gen, error) {
 }
 
 func (g *gen) count() int {
+	if g.comp != nil {
+		return g.comp.count()
+	}
 	n := 1
 	for _, a := range g.alpha {
 		n *= len(a)
@@ -662,6 +697,10 @@ func (g *gen) count() int {
 // retain the string beyond the call unless it copies it -- string(buf) does
 // copy, so it may.
 func (g *gen) each(fn func(string) bool) {
+	if g.comp != nil {
+		g.comp.each(fn)
+		return
+	}
 	n := len(g.alpha)
 	if n == 0 {
 		return
@@ -692,6 +731,9 @@ func (g *gen) each(fn func(string) bool) {
 }
 
 func (g *gen) contains(w string) bool {
+	if g.comp != nil {
+		return g.comp.contains(w)
+	}
 	if len(w) != len(g.alpha) {
 		return false
 	}

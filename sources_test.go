@@ -624,3 +624,136 @@ func regexpLine(out, pat, want string) bool {
 	}
 	return false
 }
+
+func TestCompound(t *testing.T) {
+	dir := writeSources(t, map[string]string{
+		"60-c.txt": "# generate: compound lists/words.txt\n",
+	})
+	writeList(t, dir, "words.txt", "star\nlight\nhouse\nlighthouse\n# a comment\nStar\n")
+	srcs, err := loadSources(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(srcs) != 1 {
+		t.Fatalf("a list in a subdirectory must not be a source of its own; got %d sources", len(srcs))
+	}
+	c := srcs[0]
+	got := labels(t, c)
+	// Rank-sum order, no stutters ("starstar"), and "lighthouse" once
+	// although it is both a word and light+house.
+	want := []string{
+		"starlight", "lightstar",
+		"starhouse", "housestar",
+		"starlighthouse", "lighthouse", "houselight", "lighthousestar",
+		"lightlighthouse", "lighthouselight",
+		"houselighthouse", "lighthousehouse",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("labels =\n%v\nwant\n%v", got, want)
+	}
+	if n, _ := c.Count(); n != len(want) {
+		t.Errorf("Count() = %d, want %d", n, len(want))
+	}
+	// Contains backs -source and prune, so it must agree with Each.
+	for _, w := range got {
+		if !c.Contains(w) {
+			t.Errorf("Contains(%q) = false for a label Each produced", w)
+		}
+	}
+	for _, w := range []string{"starstar", "star", "moonlight", "starligh"} {
+		if c.Contains(w) {
+			t.Errorf("Contains(%q) = true", w)
+		}
+	}
+}
+
+func TestCompoundDeduplicatesSplits(t *testing.T) {
+	dir := writeSources(t, map[string]string{
+		"60-c.txt": "# generate: compound lists/w.txt\n",
+	})
+	writeList(t, dir, "w.txt", "a\nab\nb\nbc\nc\n")
+	srcs, err := loadSources(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := labels(t, srcs[0])
+	seen := map[string]bool{}
+	for _, w := range got {
+		if seen[w] {
+			t.Errorf("%q produced twice", w)
+		}
+		seen[w] = true
+	}
+	// "abc" is a+bc and ab+c; "ab" is a+b and the word ab is not a pair.
+	for _, w := range []string{"abc", "ab", "bca"} {
+		if !seen[w] {
+			t.Errorf("%q missing from %v", w, got)
+		}
+	}
+}
+
+func TestCompoundTwoListsAndMax(t *testing.T) {
+	dir := writeSources(t, map[string]string{
+		"60-c.txt": "# generate: compound lists/l.txt lists/r.txt\n# max: 7\n",
+	})
+	writeList(t, dir, "l.txt", "my\nget\n")
+	writeList(t, dir, "r.txt", "cloud\ntree\nmy\n")
+	srcs, err := loadSources(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := labels(t, srcs[0])
+	want := []string{"mycloud", "mytree", "gettree", "getmy"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("labels = %v, want %v", got, want)
+	}
+	if srcs[0].Contains("treemy") || srcs[0].Contains("getcloud") {
+		t.Error("Contains accepts a pair in the wrong order or over max")
+	}
+}
+
+func TestCompoundBuiltinCommon(t *testing.T) {
+	dir := writeSources(t, map[string]string{
+		"60-c.txt": "# generate: compound common\n# max: 12\n",
+	})
+	srcs, err := loadSources(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !srcs[0].Contains("wordcloud") || !srcs[0].Contains("linktree") {
+		t.Error("the builtin common list misses the examples it exists for")
+	}
+	n, err := srcs[0].Count()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1504148 {
+		t.Errorf("compound common yields %d at up to 12 letters, want 1504148 (update the starter file too)", n)
+	}
+}
+
+func TestCompoundErrors(t *testing.T) {
+	for _, body := range []string{
+		"# generate: compound\n",
+		"# generate: compound a b c\n",
+		"# generate: compound missing.txt\n",
+	} {
+		dir := writeSources(t, map[string]string{"60-c.txt": body})
+		if _, err := loadSources(dir); err == nil {
+			t.Errorf("%q should fail to load", body)
+		}
+	}
+}
+
+// writeList puts a compound word list in sources.d/lists, where it is not
+// read as a source of its own.
+func writeList(t *testing.T, dir, name, body string) {
+	t.Helper()
+	sub := filepath.Join(dir, "lists")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

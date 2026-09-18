@@ -235,6 +235,7 @@ extensible through a directory of small files:
   30-alnum3.txt            three characters, letters and digits
   40-pronounceable5.txt    five letters, consonant-vowel alternating
   50-letters4.txt          every four-letter string
+  60-compound.txt          two common words, "word" + "cloud"
 ```
 
 `rgpstat sources -init` writes that directory, with everything past the
@@ -272,6 +273,32 @@ A file may instead name a generator, and carry no words at all:
 (consonant), `V` (vowel), `L` (letter), `D` (digit) and `N` (alphanumeric) --
 so `pattern CVCVC` is the pronounceable five-letter names.
 
+`compound` pairs words rather than characters, for the two-word names:
+`wordcloud`, `linktree`.
+
+```
+# 60-compound.txt
+# generate: compound common
+# max: 12
+# tlds: com
+```
+
+`common` is a list compiled into the binary: about 1250 common English words
+in rough order of frequency, with the function words taken out. Every ordered
+pair of those is 1.5 million labels at up to twelve letters, which is six days
+against `.com` -- a lot, and the reason the pairs do not come out in
+alphabetical order. They come out by the sum of the two words' ranks, so all
+the pairs of the first ten words come before any pair that uses the
+thousandth. A nightly `scan -n` that only gets partway through has then spent
+its budget on the best pairs, not on everything starting with "ace".
+
+`compound left.txt right.txt` pairs two lists of your own instead, one for each
+side, which is how you get `my` + anything or anything + `hub` without also
+getting `hubmy`. Each file is read in order, most important word first, and
+`min:` and `max:` bound the length of the whole label. Keep those lists in a
+subdirectory, `sources.d/lists/` say: a word list directly in `sources.d` is
+read as a source of its own and scanned as single words.
+
 Or it may point at a list that lives somewhere else and is maintained by
 something else, which is how a list that updates on its own schedule stays that
 way. The stub in `sources.d` carries the policy; the target is somebody else's
@@ -290,7 +317,7 @@ business:
 | `tlds`      | TLDs to pair this list with; defaults to `scan -tlds`              |
 | `priority`  | lower is scanned first; defaults to the `NN-` filename prefix      |
 | `generate`  | enumerate rather than read a file                                  |
-| `builtin`   | read a list compiled into the binary (`web2`)                      |
+| `builtin`   | read a list compiled into the binary (`web2`, `common`)            |
 | `include`   | read labels from a file elsewhere                                  |
 | `min`, `max`| label length bounds                                                |
 | `fold`      | lowercase entries and keep them (default), or drop capitalised ones |
