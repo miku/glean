@@ -23,6 +23,7 @@ func TestStage(t *testing.T) {
 	}{
 		{"available", Record{Status: statusAvail}, stageAvailable},
 		{"unknown", Record{Status: statusUnknown}, stageUnknown},
+		{"held by the registry", Record{Status: statusReserved}, stageReserved},
 		{"plain registration", Record{Status: statusTaken, Expiry: "2027-06-23",
 			EPP: []string{"clientTransferProhibited"}}, stageRegistered},
 		{"pending delete", Record{Status: statusTaken, EPP: []string{"pendingDelete"}}, stagePending},

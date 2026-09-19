@@ -299,7 +299,7 @@ a word list never leaves stale provenance behind in 300k records.`,
 			for r := range st.All() {
 				s := stage(r, now)
 				switch s {
-				case stageRegistered, stageUnknown:
+				case stageRegistered, stageReserved, stageUnknown:
 					continue
 				case stageAvailable:
 					if noAvail {
@@ -542,7 +542,7 @@ func statsCmd() *command {
 				fmt.Fprintf(w, "checked\t%s .. %s\n", oldest.Format(time.DateOnly), newest.Format(time.DateOnly))
 			}
 			fmt.Fprintln(w, "\nBY STAGE")
-			for _, s := range []string{stageAvailable, stagePending, stageRedemption, stageLapsed, stageAutoRenew, stageRegistered, stageUnknown} {
+			for _, s := range []string{stageAvailable, stagePending, stageRedemption, stageLapsed, stageAutoRenew, stageRegistered, stageReserved, stageUnknown} {
 				if n := byStage[s]; n > 0 {
 					fmt.Fprintf(w, "  %s\t%d\n", s, n)
 				}

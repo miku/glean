@@ -273,14 +273,15 @@ func (e statusError) Error() string {
 
 // lookup performs one RDAP domain query and reduces the answer to a Record.
 // Unlike whois there is nothing to pattern-match: RFC 7480 puts the verdict in
-// the HTTP status, where 404 means the name is unregistered.
+// the HTTP status, where 404 means the name is unregistered -- though not
+// always registrable; see confirmUnregistered.
 func lookup(base, domain string, timeout time.Duration) (Record, error) {
 	url := strings.TrimSuffix(base, "/") + "/domain/" + domain
 	rc, err := httpGet(url, "application/rdap+json", timeout)
 	if err != nil {
 		var se statusError
 		if errors.As(err, &se) && se.code == http.StatusNotFound {
-			return Record{Domain: domain, Status: statusAvail}, nil
+			return confirmUnregistered(base, domain, timeout)
 		}
 		return Record{}, err
 	}
@@ -294,7 +295,7 @@ func lookup(base, domain string, timeout time.Duration) (Record, error) {
 	// they do not have; 404 in the body means the same thing as 404 in the
 	// status line.
 	if doc.ErrorCode == http.StatusNotFound {
-		return Record{Domain: domain, Status: statusAvail}, nil
+		return confirmUnregistered(base, domain, timeout)
 	}
 	if doc.ErrorCode != 0 {
 		return Record{}, statusError{code: doc.ErrorCode}

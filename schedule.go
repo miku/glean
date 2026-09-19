@@ -53,6 +53,7 @@ const (
 	stageAutoRenew  = "autoRenewPeriod"
 	stageLapsed     = "lapsed"
 	stageRegistered = "registered"
+	stageReserved   = "reserved"
 	stageUnknown    = "unknown"
 )
 
@@ -64,6 +65,8 @@ func stage(r Record, now time.Time) string {
 	switch r.Status {
 	case statusAvail:
 		return stageAvailable
+	case statusReserved:
+		return stageReserved
 	case statusUnknown, "":
 		return stageUnknown
 	}
@@ -89,7 +92,8 @@ var stageRank = map[string]int{
 	stageLapsed:     3,
 	stageAutoRenew:  4,
 	stageRegistered: 5,
-	stageUnknown:    6,
+	stageReserved:   6,
+	stageUnknown:    7,
 }
 
 // dropDate estimates when the name becomes available again, and reports
@@ -165,6 +169,9 @@ func due(r Record, now time.Time) time.Time {
 	case stageAvailable:
 		// Someone else may register it; worth confirming before publishing.
 		return r.Checked.Add(7 * 24 * time.Hour)
+	case stageReserved:
+		// Registries release held names in batches, rarely and with notice.
+		return r.Checked.Add(30 * 24 * time.Hour)
 	case stageUnknown:
 		return r.Checked.Add(30 * 24 * time.Hour)
 	}

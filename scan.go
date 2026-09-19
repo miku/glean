@@ -140,6 +140,7 @@ type counters struct {
 	done      atomic.Int64
 	taken     atomic.Int64
 	avail     atomic.Int64
+	reserved  atomic.Int64
 	unknown   atomic.Int64
 	failed    atomic.Int64
 	throttled atomic.Int64
@@ -463,6 +464,8 @@ func lookupWithRetry(ctx context.Context, st *Store, q *queue, domain string, cf
 				c.taken.Add(1)
 			case statusAvail:
 				c.avail.Add(1)
+			case statusReserved:
+				c.reserved.Add(1)
 			default:
 				c.unknown.Add(1)
 			}
@@ -515,8 +518,8 @@ func reportProgress(c *counters, total int, start time.Time, lims map[string]*li
 		paced = append(paced, fmt.Sprintf("%s@%.1f/s", host, l.rate()))
 	}
 	sort.Strings(paced)
-	fmt.Fprintf(os.Stderr, "%d/%d  %.1f/s  taken=%d avail=%d unknown=%d fail=%d throttle=%d  eta=%s  [%s]\n",
-		done, total, rate, c.taken.Load(), c.avail.Load(), c.unknown.Load(),
+	fmt.Fprintf(os.Stderr, "%d/%d  %.1f/s  taken=%d avail=%d reserved=%d unknown=%d fail=%d throttle=%d  eta=%s  [%s]\n",
+		done, total, rate, c.taken.Load(), c.avail.Load(), c.reserved.Load(), c.unknown.Load(),
 		c.failed.Load(), c.throttled.Load(), eta, strings.Join(paced, " "))
 }
 

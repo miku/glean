@@ -22,10 +22,14 @@ import (
 // Verdicts. A domain is taken, free, or the registry told us something we did
 // not understand -- the third case is recorded rather than guessed at, because
 // a misread "available" is the expensive kind of wrong here.
+//
+// Reserved is the registry holding a name back: not registered, not
+// registrable either (or only at a premium the registry sets).
 const (
-	statusTaken   = "taken"
-	statusAvail   = "avail"
-	statusUnknown = "unknown"
+	statusTaken    = "taken"
+	statusAvail    = "avail"
+	statusReserved = "reserved"
+	statusUnknown  = "unknown"
 )
 
 // Record is what we know about one domain. It is deliberately flat and small:
