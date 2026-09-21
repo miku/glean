@@ -1,6 +1,7 @@
 # glean
 
-Domain name scavenging. Find domain names that are about to be deleted.
+Domain name scavenging. Find domain names that are about to be deleted. Note:
+mostly hand-architected and vibe-coded.
 
 A domain does not become available on its expiry date -- it walks the Registry
 Grace Period pipeline of [RFC 3915](https://datatracker.ietf.org/doc/rfc3915/)
@@ -16,7 +17,7 @@ fustian.org   redemptionPeriod  2026-10-06   2026-07-01  NameCheap, Inc.
 
 From [RFC 3915](https://datatracker.ietf.org/doc/rfc3915/):
 
-````
+```
 RFC 3915                EPP Grace Period Mapping          September 2004
 
    Figure 1: RGP State Diagram
