@@ -37,7 +37,7 @@ $ tldhunter -h
 Usage: tldhunter -k <keyword|domain> [-e <tld> | -E <tld-file>] [-x] [--update-tld]
 Without -e or -E, the built-in TLD list (1438 entries) is used,
 unless the keyword already ends in a known TLD, which checks just that domain.
-Results are cached in /Users/tir/.cache/tldhunter for 24h0m0s (1h0m0s if available; -ttl 0 to disable).
+Results are cached in /Users/who/.cache/tldhunter for 24h0m0s (1h0m0s if available; -ttl 0 to disable).
 Example: tldhunter -k linuxsec
        : tldhunter -k delta.sh
        : tldhunter -k linuxsec -E tlds.txt
