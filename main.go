@@ -23,7 +23,7 @@ const version = "0.2.0"
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "rgpstat: %v\n", err)
+		fmt.Fprintf(os.Stderr, "glean: %v\n", err)
 		if errors.As(err, &usageError{}) {
 			os.Exit(2)
 		}
@@ -56,7 +56,7 @@ func resolveSources(dir string, names []string, wordFile string, o wordOpts, tld
 	}
 	if len(all) == 0 {
 		if len(names) > 0 {
-			return nil, fmt.Errorf("no sources in %s; run \"rgpstat sources --init\"", dir)
+			return nil, fmt.Errorf("no sources in %s; run \"glean sources --init\"", dir)
 		}
 		return []*Source{legacySource(o, tlds)}, nil
 	}
@@ -466,7 +466,7 @@ func statsCmd() *cobra.Command {
 		fmt.Fprintf(w, "records\t%d\n", st.Len())
 		fmt.Fprintf(w, "due now\t%d\n", dueNow)
 		if orphans, err := countOrphans(st, sourcesDir, splitTLDs(tlds)); err == nil && orphans > 0 {
-			fmt.Fprintf(w, "orphaned\t%d\t(no longer in any source; see \"rgpstat prune\")\n", orphans)
+			fmt.Fprintf(w, "orphaned\t%d\t(no longer in any source; see \"glean prune\")\n", orphans)
 		}
 		if !oldest.IsZero() {
 			fmt.Fprintf(w, "checked\t%s .. %s\n", oldest.Format(time.DateOnly), newest.Format(time.DateOnly))
@@ -637,7 +637,7 @@ looked at again until shortly before that date.`,
 		if len(srcs) == 0 {
 			fmt.Printf("no sources in %s\n", sourcesDir)
 			fmt.Printf("falling back to %s, %d-%d letters, .{%s}\n", defaultDict, 4, 8, tlds)
-			fmt.Println("run \"rgpstat sources --init\" to write a starter directory")
+			fmt.Println("run \"glean sources --init\" to write a starter directory")
 			return nil
 		}
 		st, err := openStore(store)
@@ -949,7 +949,7 @@ func initSources(dir string) error {
 	}
 	if len(wrote) > 0 {
 		fmt.Println("\nenabled: web2 and every three-letter string")
-		fmt.Println("run \"rgpstat sources\" to see what the rest would cost")
+		fmt.Println("run \"glean sources\" to see what the rest would cost")
 	}
 	return nil
 }

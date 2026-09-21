@@ -1,4 +1,4 @@
-module github.com/miku/rgpstat
+module github.com/miku/glean
 
 go 1.27.1
 

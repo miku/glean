@@ -1,4 +1,4 @@
-BINARY  := rgpstat
+BINARY  := glean
 GO      := go
 GOFLAGS := -trimpath -ldflags='-s -w'
 

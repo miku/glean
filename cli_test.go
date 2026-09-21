@@ -77,7 +77,7 @@ func TestCommandHelp(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%v: %v", args, err)
 		}
-		for _, want := range []string{"rgpstat scan", "--rate", "--limit", "-n,", "priority order"} {
+		for _, want := range []string{"glean scan", "--rate", "--limit", "-n,", "priority order"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%v: help is missing %q", args, want)
 			}

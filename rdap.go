@@ -31,7 +31,7 @@ const bootstrapURL = "https://data.iana.org/rdap/dns.json"
 //
 // Built from the version constant rather than spelled out, so a release cannot
 // quietly go on announcing an old version to every registry it talks to.
-var userAgent = "rgpstat/" + version + " (+https://github.com/miku/rgpstat)"
+var userAgent = "glean/" + version + " (+https://github.com/miku/glean)"
 
 // fallbackBases lets a scan start when IANA is unreachable. These four are the
 // default TLD set and they have not moved in years, but the bootstrap file is

@@ -14,10 +14,10 @@ import (
 // get a fresh tree, with fresh defaults, every time.
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:     "rgpstat",
+		Use:     "glean",
 		Short:   "watch domains through the deletion lifecycle",
 		Version: version,
-		Long: fmt.Sprintf(`rgpstat -- watch domains through the deletion lifecycle
+		Long: fmt.Sprintf(`glean -- watch domains through the deletion lifecycle
 
 Word lists live in
   %s

@@ -98,11 +98,11 @@ func defaultStorePath() string {
 	if dir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "rgpstat.jsonl.zst"
+			return "glean.jsonl.zst"
 		}
 		dir = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(dir, "rgpstat", "domains.jsonl.zst")
+	return filepath.Join(dir, "glean", "domains.jsonl.zst")
 }
 
 // Compression is picked by suffix when writing, and by magic bytes when
@@ -424,7 +424,7 @@ func (s *Store) Flush() error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".rgpstat-*.tmp")
+	tmp, err := os.CreateTemp(dir, ".glean-*.tmp")
 	if err != nil {
 		return err
 	}

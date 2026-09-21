@@ -1,4 +1,4 @@
-# rgpstat
+# glean
 
 A daily curated list of soon expiring domain names.
 
@@ -6,15 +6,15 @@ Joins a wordlist with a live signal and compiles the interesting part: names
 whose `.com`, `.net`, `.org` or `.xyz` registration is actually on its way to
 being deleted.
 
-The name is the premise. A domain does not become available on its expiry date
--- it walks the Registry Grace Period pipeline of RFC 3915, and a list built on
-"expires next Tuesday" is close to useless. What this reports on is the RGP
-status codes, which say where in that pipeline a name really is. Hence
-`rgpstat`, in the manner of `vmstat` and `netstat`: a running report on a
-system's state rather than a one-shot query.
+A domain does not become available on its expiry date -- it walks the Registry
+Grace Period pipeline of RFC 3915, and a list built on "expires next Tuesday"
+is close to useless. What this reports on is the RGP status codes, which say
+where in that pipeline a name really is. Hence `glean`: gleaners gather what is
+left in the field after the harvest, and this gathers the names the registries
+are about to let go.
 
 ```
-$ rgpstat list
+$ glean list
 DOMAIN        STAGE             DROPS        EXPIRY      REGISTRAR
 lummox.net    available         -            -           -
 quiddity.com  pendingDelete     2026-09-11   2026-06-27  GoDaddy.com, LLC
@@ -24,30 +24,30 @@ fustian.org   redemptionPeriod  2026-10-06   2026-07-01  NameCheap, Inc.
 ## Installation
 
 ```
-$ go install github.com/miku/rgpstat@latest
+$ go install github.com/miku/glean@latest
 ```
 
 ## Usage
 
 ```
-$ rgpstat sources        # the word lists, and what each one will cost
-$ rgpstat words          # the candidate labels those lists produce
-$ rgpstat scan           # look up everything due a check
-$ rgpstat list           # what is dropping, soonest first
-$ rgpstat stats          # summarise the store
-$ rgpstat prune          # drop records no source covers any more
+$ glean sources        # the word lists, and what each one will cost
+$ glean words          # the candidate labels those lists produce
+$ glean scan           # look up everything due a check
+$ glean list           # what is dropping, soonest first
+$ glean stats          # summarise the store
+$ glean prune          # drop records no source covers any more
 ```
 
-`rgpstat help <command>` has the flags and the long form, and
-`rgpstat completion bash|zsh|fish` prints a completion script.
+`glean help <command>` has the flags and the long form, and
+`glean completion bash|zsh|fish` prints a completion script.
 
 The first scan is the expensive one. After that, `scan` only looks up what the
 schedule says is due, which settles at a few thousand lookups a day -- see
 [Why the second scan is cheap](#why-the-second-scan-is-cheap).
 
 ```
-$ rgpstat scan
-2 sources, 92523 labels, 3 req/s per endpoint, store ~/.local/state/rgpstat/domains.jsonl.zst
+$ glean scan
+2 sources, 92523 labels, 3 req/s per endpoint, store ~/.local/state/glean/domains.jsonl.zst
 370092 domains to check, 0 up to date, 0 in store
 1761/370092  8.9/s  taken=1363 avail=334 unknown=0 fail=0 throttle=0  eta=11h29m
 ```
@@ -162,7 +162,7 @@ than the cache directory -- a wiped cache is an inconvenience, a wiped scan is
 five hours.
 
 ```
-$ zstdcat ~/.local/state/rgpstat/domains.jsonl.zst | head -1
+$ zstdcat ~/.local/state/glean/domains.jsonl.zst | head -1
 {"domain":"aalii.com","status":"taken","epp":["clientTransferProhibited"],
  "expiry":"2027-06-23","changed":"2026-05-27",
  "registrar":"TurnCommerce, Inc. DBA NameBright.com","checked":"2026-09-07T12:23:14Z"}
@@ -181,7 +181,7 @@ no `.zst` exists, and the next scan writes it out as `domains.jsonl.zst` (the
 old file is left alone).
 
 The word lists are configuration, not data, and live in the XDG *config*
-directory instead -- `~/.config/rgpstat/sources.d/`. They are inputs you
+directory instead -- `~/.config/glean/sources.d/`. They are inputs you
 write; the store is what the tool accumulates.
 
 ## How it works
@@ -228,8 +228,8 @@ three-quarters orphaned to the second. Pass `--dict /usr/share/dict/words`, or
 write `include:` instead of `builtin:`, if you would rather have this host's.
 
 ```
-$ rgpstat words --count             # 74947
-$ rgpstat words --min 4 --max 6   # 27939 shorter, better ones
+$ glean words --count           # 74947
+$ glean words --min 4 --max 6   # 27939 shorter, better ones
 ```
 
 That is a fine default and a poor ceiling. Three- and four-letter names are the
@@ -237,7 +237,7 @@ interesting ones and the dictionary has almost none of them, so the list is
 extensible through a directory of small files:
 
 ```
-~/.config/rgpstat/sources.d/
+~/.config/glean/sources.d/
   10-web2.txt              web2, compiled in
   20-letters3.txt          every three-letter string
   30-alnum3.txt            three characters, letters and digits
@@ -246,7 +246,7 @@ extensible through a directory of small files:
   60-compound.txt          two common words, "word" + "cloud"
 ```
 
-`rgpstat sources --init` writes that directory, with everything past the
+`glean sources --init` writes that directory, with everything past the
 three-letter list switched off and the arithmetic for why in each file. The
 lists have different lifecycles -- web2 has not changed since 1934, a surname
 list is regenerated from a census dump now and then, an enumeration of every
@@ -337,7 +337,7 @@ The one question worth answering before enabling a list is what the first pass
 will cost, which is what `sources` is for:
 
 ```
-$ rgpstat sources
+$ glean sources
 SOURCE                PRI  SPEC                   LABELS  TLDS             DOMAINS  NEW      DUE   FIRST PASS
 web2                  10   builtin:web2           74947   com,net,org,xyz  299788   0        1674  -
 letters3              20   letters 3              17576   com,net,org,xyz  70304    70304    0     3.3h
@@ -381,7 +381,7 @@ touches every registry rather than finishing one TLD and never reaching the
 rest.
 
 ```
-$ rgpstat scan --limit 50000   # a night's worth, best lists first
+$ glean scan --limit 50000   # a night's worth, best lists first
 ```
 
 ### Provenance
@@ -396,8 +396,8 @@ nothing -- `scan` stops scheduling them, so they are never looked up again --
 but `stats` counts them and `prune` removes them:
 
 ```
-$ rgpstat prune          # dry run, reports what it would delete
-$ rgpstat prune --force  # actually delete
+$ glean prune          # dry run, reports what it would delete
+$ glean prune --force  # actually delete
 ```
 
 `scan --wordlist list.txt` still takes a single curated list and bypasses `sources.d`
