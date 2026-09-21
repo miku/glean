@@ -1,0 +1,54 @@
+[Unit]
+Description=glean: look up every domain candidate that is due a check
+Documentation=https://github.com/miku/glean
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# A scan runs to completion and exits; glean.timer starts the next one. The
+# first scan can take days, which is fine: oneshot units have no start timeout,
+# and the store is checkpointed every minute, so a stop or reboot costs at most
+# a minute of lookups.
+Type=oneshot
+ExecStart=/usr/local/bin/glean scan
+
+User=glean
+Group=glean
+
+# The store lives in /var/lib/glean and the word lists in /etc/glean/sources.d,
+# which is where glean's XDG defaults land with these two set.
+Environment=XDG_STATE_HOME=/var/lib XDG_CONFIG_HOME=/etc
+StateDirectory=glean
+StateDirectoryMode=0750
+ConfigurationDirectory=glean
+
+# glean flushes the store on SIGTERM; give it time to write a large one.
+KillSignal=SIGTERM
+TimeoutStopSec=5min
+
+# It is a background job: stay out of the way of everything else.
+Nice=10
+IOSchedulingClass=idle
+
+# Hardening. glean only needs the network and its state directory.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+UMask=0027

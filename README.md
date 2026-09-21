@@ -27,6 +27,9 @@ fustian.org   redemptionPeriod  2026-10-06   2026-07-01  NameCheap, Inc.
 $ go install github.com/miku/glean@latest
 ```
 
+To run scans continuously on Linux, see the systemd service and timer in
+[extra/linux](extra/linux/README.md).
+
 ## Usage
 
 ```

@@ -1,0 +1,14 @@
+[Unit]
+Description=Run glean scan continuously, with a pause between runs
+Documentation=https://github.com/miku/glean
+
+[Timer]
+# Start shortly after boot, then again an hour after each scan finishes. A scan
+# that is still running is never started twice, and the next one only looks up
+# what the schedule says is due, so after the first pass most runs are short.
+OnBootSec=5min
+OnUnitInactiveSec=1h
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
