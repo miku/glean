@@ -80,13 +80,13 @@ reports:
 | `pendingDelete`    | drops within five days, and the date is predictable               |
 | `redemptionPeriod` | drops in about 35 days unless the registrant pays to restore it   |
 | `lapsed`           | term ended, registry publishes no RGP status; somewhere in the pipeline |
-| `autoRenewPeriod`  | just renewed; the registrar has 45 days to hand it back (`-all`)  |
+| `autoRenewPeriod`  | just renewed; the registrar has 45 days to hand it back (`--all`)  |
 
 `autoRenewPeriod` is the one to be careful with, and the trap that RDAP sets
 for you. It does not mean "expired". The registry has already renewed the name
 and pushed its expiry date a year into the future; the status only records that
 the registrar can still return the registration for a refund. Most do not. It
-is a lead rather than a listing, so it is behind `-all`, and its drop date is
+is a lead rather than a listing, so it is behind `--all`, and its drop date is
 projected from the renewal event -- never from the expiry date, which is now a
 year out.
 
@@ -122,7 +122,7 @@ lookups a day, which is minutes rather than hours.
 The scan is paced per registry *host*, not per TLD -- `.com` and `.net` are one
 machine reached through two URL paths, and limits are enforced per client
 address. The pacing adapts: a throttling response cuts the rate for that host,
-a run of clean ones walks it back toward `-rate`.
+a run of clean ones walks it back toward `--rate`.
 
 Registries signal overload in different ways, and not all of them by the book.
 Verisign answers `429`. PIR (`.org`) sheds load with a **`403` from an AWS load
@@ -142,15 +142,15 @@ What the default set actually tolerates, measured rather than guessed:
 The limit is not really a rate. A burst of 400 requests at 6/s passes cleanly
 at any concurrency, and it is the *sustained* run that degrades -- a token
 bucket with a generous burst and a slow refill. Neither concurrency
-(`-perhost`) nor HTTP/2 was found to matter.
+(`--per-host`) nor HTTP/2 was found to matter.
 
-This is why `-minrate` defaults as low as it does. PIR's sustained allowance
+This is why `--min-rate` defaults as low as it does. PIR's sustained allowance
 sits below one request per second; a higher floor leaves the limiter pinned at
 the bottom *and still throttled*, burning retries and marking perfectly good
 domains as failures. The limiter needs room to find the real number.
 
 The practical consequence: `.com` and `.net` scan fast, `.org` and `.xyz` are
-slow no matter how you ask. Bound a run with `scan -n 20000` and let a first
+slow no matter how you ask. Bound a run with `scan --limit 20000` and let a first
 scan take a few days; the schedule and the resumable store are built for
 exactly that.
 
@@ -224,12 +224,12 @@ web2 is compiled into the binary rather than read from
 is web2 on the BSDs and macOS, but usually the much smaller `american-english`
 on Debian. The same command would otherwise produce 74,947 candidates on one
 machine and 34,912 on another, and a store built on the first would look
-three-quarters orphaned to the second. Pass `-dict /usr/share/dict/words`, or
+three-quarters orphaned to the second. Pass `--dict /usr/share/dict/words`, or
 write `include:` instead of `builtin:`, if you would rather have this host's.
 
 ```
-$ rgpstat words -c              # 74947
-$ rgpstat words -min 4 -max 6   # 27939 shorter, better ones
+$ rgpstat words --count             # 74947
+$ rgpstat words --min 4 --max 6   # 27939 shorter, better ones
 ```
 
 That is a fine default and a poor ceiling. Three- and four-letter names are the
@@ -246,7 +246,7 @@ extensible through a directory of small files:
   60-compound.txt          two common words, "word" + "cloud"
 ```
 
-`rgpstat sources -init` writes that directory, with everything past the
+`rgpstat sources --init` writes that directory, with everything past the
 three-letter list switched off and the arithmetic for why in each file. The
 lists have different lifecycles -- web2 has not changed since 1934, a surname
 list is regenerated from a census dump now and then, an enumeration of every
@@ -297,7 +297,7 @@ pair of those is 1.5 million labels at up to twelve letters, which is six days
 against `.com` -- a lot, and the reason the pairs do not come out in
 alphabetical order. They come out by the sum of the two words' ranks, so all
 the pairs of the first ten words come before any pair that uses the
-thousandth. A nightly `scan -n` that only gets partway through has then spent
+thousandth. A nightly `scan --limit` that only gets partway through has then spent
 its budget on the best pairs, not on everything starting with "ace".
 
 `compound left.txt right.txt` pairs two lists of your own instead, one for each
@@ -322,7 +322,7 @@ business:
 
 | directive   | meaning                                                          |
 | ----------- | ---------------------------------------------------------------- |
-| `tlds`      | TLDs to pair this list with; defaults to `scan -tlds`              |
+| `tlds`      | TLDs to pair this list with; defaults to `scan --tlds`             |
 | `priority`  | lower is scanned first; defaults to the `NN-` filename prefix      |
 | `generate`  | enumerate rather than read a file                                  |
 | `builtin`   | read a list compiled into the binary (`web2`, `common`)            |
@@ -349,7 +349,7 @@ enabled                                                          370092   70304 
 
 Every file in the directory is listed, the switched-off ones marked `(off)`,
 because the question the table answers is what turning one on would cost. Pass
-`-on` for the enabled ones alone.
+`--on` for the enabled ones alone.
 
 `NEW` is the column to read, and it is marginal: labels this source contributes
 that are not already in the store and were not already contributed by an
@@ -371,7 +371,7 @@ What a big list costs is the one-off.
 
 ### Spending a short budget
 
-`scan -n` spends its budget in source priority order rather than spreading it
+`scan --limit` spends its budget in source priority order rather than spreading it
 evenly. This matters as soon as there is more than one list: an even split
 gives the largest share to the largest source, which is the four-letter
 enumeration, and a nightly run that grinds through that while the curated
@@ -381,12 +381,12 @@ touches every registry rather than finishing one TLD and never reaching the
 rest.
 
 ```
-$ rgpstat scan -n 50000      # a night's worth, best lists first
+$ rgpstat scan --limit 50000   # a night's worth, best lists first
 ```
 
 ### Provenance
 
-`list -source letters3` filters by which list a name came from. That is
+`list --source letters3` filters by which list a name came from. That is
 answered by asking the source whether it contains the label, not by a tag in
 the store: the store stays a record of what the registries said, and editing a
 word list never leaves stale provenance behind in 300k records.
@@ -397,10 +397,10 @@ but `stats` counts them and `prune` removes them:
 
 ```
 $ rgpstat prune          # dry run, reports what it would delete
-$ rgpstat prune -f       # actually delete
+$ rgpstat prune --force  # actually delete
 ```
 
-`scan -w list.txt` still takes a single curated list and bypasses `sources.d`
+`scan --wordlist list.txt` still takes a single curated list and bypasses `sources.d`
 entirely, and with no `sources.d` at all the tool behaves exactly as it did
 before the directory existed: web2, four to eight letters, four TLDs.
 
