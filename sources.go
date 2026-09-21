@@ -113,7 +113,7 @@ type Source struct {
 	Name     string   // "letters3", from the filename with NN- and extension stripped
 	Path     string   // the file in sources.d
 	Priority int      // lower is scanned first when the budget is short
-	TLDs     []string // nil means "use the scan's -tlds"
+	TLDs     []string // nil means "use the scan's --tlds"
 	Enabled  bool
 
 	gen     *gen   // set for a generated source
@@ -196,7 +196,7 @@ func isSourceFile(name string) bool {
 }
 
 // sourceName strips the ordering prefix and the extension: "20-letters3.txt"
-// names the source "letters3", which is what -source takes.
+// names the source "letters3", which is what --source takes.
 func sourceName(file string) (name string, priority int) {
 	name = strings.TrimSuffix(file, filepath.Ext(file))
 	priority = defaultPriority
@@ -505,7 +505,7 @@ func (s *Source) Each(fn func(string) bool) error {
 
 // Contains reports whether a label belongs to this source.
 //
-// This is how provenance is answered -- "list -source letters3", "prune" --
+// This is how provenance is answered -- "list --source letters3", "prune" --
 // without putting a source name in the store. The store stays a log of what
 // the registries said, the sources stay the inputs, and editing a list does
 // not leave stale tags behind in 300k records.
@@ -568,7 +568,7 @@ func fileSource(path string, tlds []string) *Source {
 }
 
 // selectSources filters by name, and reports the names that matched nothing so
-// a typo in -source is an error rather than a silently empty scan.
+// a typo in --source is an error rather than a silently empty scan.
 func selectSources(all []*Source, names []string) ([]*Source, error) {
 	if len(names) == 0 {
 		var out []*Source

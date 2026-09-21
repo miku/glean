@@ -30,7 +30,7 @@ func TestReadWords(t *testing.T) {
 		t.Errorf("readWords = %v, want %v", got, want)
 	}
 
-	// -proper lowercases capitalized entries and keeps them.
+	// --proper lowercases capitalized entries and keeps them.
 	got, err = readWords(wordOpts{path: dict, min: 4, max: 8, proper: true})
 	if err != nil {
 		t.Fatal(err)

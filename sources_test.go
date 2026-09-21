@@ -270,7 +270,7 @@ func TestGeneratorPattern(t *testing.T) {
 		t.Error("abc should not match CVC: a is a vowel in the consonant slot")
 	}
 	// Every label the generator emits must satisfy the pattern it came from,
-	// which is what Contains relies on for -source filtering.
+	// which is what Contains relies on for --source filtering.
 	g.each(func(w string) bool {
 		if !g.contains(w) {
 			t.Fatalf("generated %q but contains() rejects it", w)
@@ -356,7 +356,7 @@ func TestSelectSources(t *testing.T) {
 	if names := sourceNames(got); !reflect.DeepEqual(names, []string{"a", "b"}) {
 		t.Errorf("default selection = %v, want [a b]", names)
 	}
-	// Named explicitly, a disabled source is still selectable: -source is a
+	// Named explicitly, a disabled source is still selectable: --source is a
 	// deliberate act.
 	got, err = selectSources(all, []string{"c"})
 	if err != nil {
@@ -366,7 +366,7 @@ func TestSelectSources(t *testing.T) {
 		t.Errorf("explicit selection = %v, want [c]", names)
 	}
 	if _, err := selectSources(all, []string{"a", "nope"}); err == nil {
-		t.Error("a -source that matches nothing should be an error, not an empty scan")
+		t.Error("a --source that matches nothing should be an error, not an empty scan")
 	}
 }
 
@@ -443,7 +443,7 @@ func TestIsSourceFile(t *testing.T) {
 }
 
 func TestStarterSourcesAllParse(t *testing.T) {
-	// The files "sources -init" writes are prose-heavy and full of numbers;
+	// The files "sources --init" writes are prose-heavy and full of numbers;
 	// they must survive their own parser.
 	dir := t.TempDir()
 	if err := initSourcesQuiet(dir); err != nil {
@@ -493,7 +493,7 @@ func TestBuiltinWeb2(t *testing.T) {
 	if got := srcs[0].Spec(); got != "builtin:web2" {
 		t.Errorf("Spec() = %q, want builtin:web2", got)
 	}
-	// Contains backs -source filtering and prune, so it must agree with Each.
+	// Contains backs --source filtering and prune, so it must agree with Each.
 	if !srcs[0].Contains("zebra") || srcs[0].Contains("zzzzz") {
 		t.Error("Contains disagrees with the list")
 	}
@@ -654,7 +654,7 @@ func TestCompound(t *testing.T) {
 	if n, _ := c.Count(); n != len(want) {
 		t.Errorf("Count() = %d, want %d", n, len(want))
 	}
-	// Contains backs -source and prune, so it must agree with Each.
+	// Contains backs --source and prune, so it must agree with Each.
 	for _, w := range got {
 		if !c.Contains(w) {
 			t.Errorf("Contains(%q) = false for a label Each produced", w)

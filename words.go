@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// defaultDict is the system dictionary, used by -dict and by the no-sources.d
+// defaultDict is the system dictionary, used by --dict and by the no-sources.d
 // fallback. Note that it is not the same file everywhere: on the BSDs and
 // macOS it is web2, on Debian it is whichever "wordlist" alternative is
 // installed. For a list that does not change between machines, use the

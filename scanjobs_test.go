@@ -118,14 +118,14 @@ func TestScanSkipsWhatIsNotDue(t *testing.T) {
 		t.Errorf("%d lookups, want 1 (the unseen name only)", got)
 	}
 
-	// -force ignores the schedule.
+	// --force ignores the schedule.
 	cfg.force = true
 	hits.Store(0)
 	if err := runScanJobs(context.Background(), st, fakeRegistry(srv.URL, "com"), wordSource("sleepy", "fresh"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	if got := hits.Load(); got != 2 {
-		t.Errorf("-force did %d lookups, want 2", got)
+		t.Errorf("--force did %d lookups, want 2", got)
 	}
 }
 
