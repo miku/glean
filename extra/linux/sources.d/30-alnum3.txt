@@ -1,0 +1,6 @@
+# Three characters, letters and digits. 46,656 labels, roughly nine hours
+# for four TLDs. Switch the enabled line below to turn it on.
+# enabled: false
+# generate: alnum 3
+# tlds: com,net,org,xyz
+# priority: 30

@@ -1,0 +1,8 @@
+# Every four-letter string: 456,976 labels. About 42 hours against .com
+# alone, three and a half days across four TLDs. Worth doing once, but let
+# a nightly "scan --limit" grind through it rather than sitting on one run --
+# the priority below puts it last in line for the budget.
+# enabled: false
+# generate: letters 4
+# tlds: com
+# priority: 50

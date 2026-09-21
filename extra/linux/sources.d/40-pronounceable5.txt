@@ -1,0 +1,8 @@
+# Five letters, consonant-vowel alternating: 231,525 labels, which is two
+# per cent of the eleven million five-letter strings and contains most of
+# the pronounceable ones. Enumerating all of 5 letters is about six weeks
+# per TLD; this is about two days.
+# enabled: false
+# generate: pattern CVCVC
+# tlds: com
+# priority: 40

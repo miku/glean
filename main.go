@@ -19,7 +19,9 @@ import (
 	"github.com/spf13/pflag"
 )
 
-const version = "0.2.0"
+// version is a var, not a const, so that goreleaser can set it from the git
+// tag with -X main.version; see .goreleaser.yaml.
+var version = "0.2.0"
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {

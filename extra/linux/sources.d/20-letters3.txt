@@ -1,0 +1,7 @@
+# Every three-letter string. 17,576 labels, four TLDs, about three hours
+# for the first pass -- easily the best value in this directory. A
+# three-letter .com in pendingDelete is the most interesting row this tool
+# can print.
+# generate: letters 3
+# tlds: com,net,org,xyz
+# priority: 20

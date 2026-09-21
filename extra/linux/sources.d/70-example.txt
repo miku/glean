@@ -1,0 +1,17 @@
+# An example of a word list of your own: one label per line, and directives
+# in the leading comment block only. Replace the words below with a list you
+# care about, or drop any .txt file next to this one, and set enabled to true.
+# The next scan picks it up.
+# enabled: false
+# tlds: com,net
+# min: 3
+# max: 12
+# priority: 25
+anvil
+beacon
+cinder
+harbor
+lantern
+meadow
+quarry
+thimble

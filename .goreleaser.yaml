@@ -1,0 +1,81 @@
+# goreleaser config for glean. See https://goreleaser.com
+#
+# Local dry run:   make snapshot   (writes everything to ./dist, no publishing)
+# Real release:    git tag vX.Y.Z && make release   (needs GITHUB_TOKEN)
+version: 2
+
+project_name: glean
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: glean
+    binary: glean
+    main: .
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags: [-s, -w, "-X main.version={{.Version}}"]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
+archives:
+  - formats: [tar.gz]
+    files:
+      - LICENSE
+      - README.md
+      - extra/linux/*
+
+# Linux packages. They install the binary where glean.service expects it, the
+# systemd units, the sysusers entry and the starter word lists in
+# /etc/glean/sources.d. The timer is not enabled, see extra/linux/README.md.
+nfpms:
+  - id: packages
+    package_name: glean
+    homepage: https://github.com/miku/glean
+    maintainer: Martin Czygan <martin.czygan@gmail.com>
+    description: A daily curated list of soon expiring domain names.
+    license: MIT
+    section: utils
+    priority: optional
+    formats: [deb, rpm]
+    file_name_template: "{{ .ConventionalFileName }}"
+    bindir: /usr/local/bin
+    contents:
+      - src: extra/linux/glean.service
+        dst: /usr/lib/systemd/system/glean.service
+        file_info: { mode: 0644 }
+      - src: extra/linux/glean.timer
+        dst: /usr/lib/systemd/system/glean.timer
+        file_info: { mode: 0644 }
+      - src: extra/linux/glean.sysusers
+        dst: /usr/lib/sysusers.d/glean.conf
+        file_info: { mode: 0644 }
+      # Word lists are configuration: an upgrade must not undo local edits.
+      - src: extra/linux/sources.d/*.txt
+        dst: /etc/glean/sources.d/
+        type: config|noreplace
+        file_info: { mode: 0644 }
+    scripts:
+      postinstall: extra/linux/postinstall.sh
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^Merge "
+
+release:
+  github:
+    owner: miku
+    name: glean
