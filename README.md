@@ -1,7 +1,7 @@
 # glean
 
 Domain name scavenging. Find domain names that are about to be deleted. Note:
-mostly hand-architected and vibe-coded.
+designed by hand, coded on the GPU.
 
 A domain does not become available on its expiry date -- it walks the Registry
 Grace Period pipeline of [RFC 3915](https://datatracker.ietf.org/doc/rfc3915/)
