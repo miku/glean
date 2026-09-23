@@ -16,10 +16,12 @@ User=glean
 Group=glean
 
 # The store lives in /var/lib/glean and the word lists in /etc/glean/sources.d,
-# which is where glean's XDG defaults land with these two set.
+# which is where glean's XDG defaults land with these two set. The store holds
+# only public registry data, so it is world readable: any user can run
+# `glean list` against it.
 Environment=XDG_STATE_HOME=/var/lib XDG_CONFIG_HOME=/etc
 StateDirectory=glean
-StateDirectoryMode=0750
+StateDirectoryMode=0755
 ConfigurationDirectory=glean
 
 # glean flushes the store on SIGTERM; give it time to write a large one.
@@ -51,4 +53,4 @@ MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 CapabilityBoundingSet=
-UMask=0027
+UMask=0022
