@@ -208,7 +208,10 @@ fields:
   a lifecycle measured in days.
 * **Endpoints** come from IANA's bootstrap registry (RFC 9224), cached beside
   the store for a week, with a built-in fallback for the four default TLDs so a
-  scan can start without reaching IANA.
+  scan can start without reaching IANA. A registry that runs RDAP without ever
+  filing that entry -- DENIC, for `.de`, is the one today -- is compiled in
+  beside the fallbacks (`extraBases` in `rdap.go`); if it files its service
+  with IANA later, the filing wins.
 
 The sibling tool [tldhunter](https://github.com/miku/tldhunter) does the other
 half of this problem -- one keyword against 1438 TLDs, with whois fallback and

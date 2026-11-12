@@ -1,0 +1,34 @@
+# Every three-letter string against .de: the same 17,576 labels as
+# 20-letters3.txt, one registry, an hour and a half for the first pass.
+#
+# Know what you are buying. Twelve random three-letter .de names were sampled
+# through DENIC's RDAP to write this and all twelve were held; a sample of
+# eight four-letter names came back five held and three free. So the first
+# pass finds nearly nothing available, and the value is in the passes after
+# it -- a three-letter .de going unregistered is news, and this is the list
+# that notices.
+#
+# The catch is that DENIC publishes no expiry date and no deletion status.
+# It answers 404 for a free name and "active" with a last-changed date for a
+# held one, and that is all. glean can therefore say when a .de name *is*
+# free but never when it is about to be: a held one is scheduled on the
+# no-expiry path in due(), a recheck every 90 days, which catches the drop of
+# a name that drops roughly once a year about as well as a yearly appointment
+# does. This is not the .com watch, where pendingDelete dates the drop to a
+# five-day window. Cheap to run, and honest to read: taken, or free today.
+#
+# DENIC runs RDAP but has never filed it with IANA, so the endpoint is
+# compiled in -- see extraBases in rdap.go. Without that entry "scan" refuses
+# the source with "no RDAP endpoint for: de".
+#
+# Switched off, and not only for the usual reason: DENIC's RDAP notice says
+# the data "may only be used within the scope of technical or administrative
+# necessities of Internet operation or to remedy legal problems". Whether
+# that covers a nightly sweep is a judgement to make with the notice in front
+# of you, not one this file can make. The adaptive limiter is no guide here
+# either -- it backs off when a registry refuses, and DENIC publishes no
+# allowance to be refused against.
+# enabled: false
+# generate: letters 3
+# tlds: de
+# priority: 21

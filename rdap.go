@@ -43,6 +43,22 @@ var fallbackBases = map[string]string{
 	"xyz": "https://rdap.centralnic.com/xyz/",
 }
 
+// extraBases are the registries that run a working RDAP service and have never
+// put it in IANA's bootstrap. The bootstrap is a registry, not a directory:
+// nothing compels an operator to file an entry, and a TLD that is absent from
+// it simply has no endpoint as far as this file is concerned.
+//
+// These are merged into the same map as the fallbacks, below, so a registry
+// that does register its service later takes precedence over the copy here
+// without this list having to be revisited. A source in sources.d that names
+// one of these TLDs is otherwise refused with "no RDAP endpoint for".
+var extraBases = map[string]string{
+	// DENIC. Answers the two questions this tool asks -- 404 for a free name,
+	// "active" plus a last-changed date for a held one -- and publishes no
+	// expiry, so a .de record schedules on the no-expiry path in due().
+	"de": "https://rdap.denic.de/",
+}
+
 // dateRe pulls the calendar date off an RDAP timestamp. RDAP dates are RFC
 // 3339, so the date is always the leading component, and registries disagree
 // about everything after it.
@@ -64,6 +80,9 @@ type bootstrapFile struct {
 func loadRegistry(cachePath string, ttl, timeout time.Duration) *registry {
 	r := &registry{bases: make(map[string]string, 1500)}
 	for tld, base := range fallbackBases {
+		r.bases[tld] = base
+	}
+	for tld, base := range extraBases {
 		r.bases[tld] = base
 	}
 

@@ -262,6 +262,31 @@ func TestBootstrapFallsBackToBuiltinList(t *testing.T) {
 	}
 }
 
+func TestExtraBasesResolve(t *testing.T) {
+	// DENIC runs an RDAP service and has never filed it with IANA, so .de
+	// resolves from the compiled-in extras and from nothing else. A source
+	// that names such a TLD is otherwise refused as having no endpoint.
+	reg := loadRegistry(t.TempDir()+"/missing.json", time.Hour, time.Millisecond)
+	for tld := range extraBases {
+		if _, ok := reg.base(tld); !ok {
+			t.Errorf("built-in extra missing for .%s", tld)
+		}
+	}
+
+	// A registry that does file its service wins, so the list above cannot
+	// strand a TLD on an endpoint its registry has moved on from.
+	dir := t.TempDir()
+	path := dir + "/bootstrap.json"
+	body := `{"services":[[["de"],["https://rdap.new.example/de/"]]]}`
+	if err := atomicWriteFile(path, []byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	reg = loadRegistry(path, time.Hour, time.Millisecond)
+	if got, _ := reg.base("de"); got != "https://rdap.new.example/de/" {
+		t.Errorf("base(.de) = %q, want the bootstrap's answer", got)
+	}
+}
+
 func TestEventLookup(t *testing.T) {
 	var doc rdapDoc
 	if err := json.Unmarshal([]byte(verisignBody), &doc); err != nil {
